@@ -1,8 +1,5 @@
-from pyscipopt import Model
-
-
 def main():
-    model = Model("Example")
+    print()
 
 
 if __name__ == '__main__':
