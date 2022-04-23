@@ -203,22 +203,23 @@ def generate_setcov(n_rows: int, n_cols: int, density: float, filepath: str, rng
     c = rng.randint(max_coef, size=n_cols) + 1
 
     # Sparce CSC to sparse CSR matrix.
-    A = scipy.sparse.csc_matrix((np.ones(len(indices), dtype=int), indices, indptr), shape=(n_rows, n_cols)).tocsr()
-    indices = A.indices
-    indptr = A.indptr
+    matrix = scipy.sparse.csc_matrix((np.ones(len(indices), dtype=int), indices, indptr),
+                                     shape=(n_rows, n_cols)).tocsr()
+    indices = matrix.indices
+    indptr = matrix.indptr
 
     # Write problem to CPLEX LP file.
-    with open(filename, 'w') as file:
+    with open(filepath, 'w') as file:
         file.write("minimize\nOBJ:")
-        file.write("".join([f" +{c[j]} x{j + 1}" for j in range(ncols)]))
+        file.write("".join([f" +{c[j]} x{j + 1}" for j in range(n_cols)]))
 
         file.write("\n\nsubject to\n")
-        for i in range(nrows):
+        for i in range(n_rows):
             row_cols_str = "".join([f" +1 x{j + 1}" for j in indices[indptr[i]:indptr[i + 1]]])
             file.write(f"C{i}:" + row_cols_str + f" >= 1\n")
 
         file.write("\nbinary\n")
-        file.write("".join([f" x{j + 1}" for j in range(ncols)]))
+        file.write("".join([f" x{j + 1}" for j in range(n_cols)]))
 
 
 def generate_combauc(random, filename, n_items=100, n_bids=500, min_value=1, max_value=100, value_deviation=0.5,
