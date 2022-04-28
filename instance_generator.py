@@ -23,7 +23,6 @@ References
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
 
-import argparse
 import os
 from itertools import combinations
 
@@ -65,6 +64,8 @@ class Graph:
 
     def clique_partition(self):
         """Partitions the graph into cliques using a greedy algorithm.
+
+        A clique is a set of nodes for which any two nodes in the set are connected.
 
         :return: The resulting clique partition.
         """
@@ -112,10 +113,14 @@ class Graph:
         return Graph(n_nodes, edges, degrees, neighbors)
 
     @staticmethod
-    def barabasi_albert(n_nodes: int, affinity: int, rng: np.random.RandomState):
+    def barabasi_albert(n_nodes: int, rng: np.random.RandomState, affinity=4):
         """Generates a Barabási-Albert random graph with a given affinity (number of connections for each new node).
 
-        Based on the algorithm described in [1]_.
+        This method dynamically models a scale-free network, based on the algorithm described in [1]_. We start with
+        an initial number of nodes :math:`m_0`, and then at every iteration a new node is added and connected to
+        :math:`m_0` other nodes, until the desired number of nodes is reached. Note that this implies that the first
+        node that we add is connected to all initial nodes. Nodes are randomly connected to other nodes,
+        with a probability that is proportional to the connectivity of the other node.
 
         References
         ==========
@@ -123,9 +128,9 @@ class Graph:
             509–512. https://doi.org/10.1126/SCIENCE.286.5439.509
 
         :param n_nodes: The number of nodes in the graph (m).
+        :param rng: A random number generator.
         :param affinity: The initial number of nodes, and the number of nodes that each new node will be attached to
             (m = m_0).
-        :param rng: A random number generator.
         :return: The random graph.
         """
 
@@ -152,10 +157,89 @@ class Graph:
         return Graph(n_nodes, edges, degrees, neighbors)
 
 
-def generate_setcov(n_rows: int, n_cols: int, density: float, filepath: str, rng: np.random.RandomState, max_coef=100):
-    """Generates a set covering problem instance and writes to CPLEX LP file.
+def generate_instances():
+    """Generates set covering, combinatorial auction, capacitated facility, and independent set problem instances in
+    accordance with our data generation scheme.
+    """
+    rng = np.random.RandomState(0)
+    generate_setcovs(rng)
+    generate_combaucs(rng)
+    generate_capfacs(rng)
+    generate_indsets(rng)
 
-    Based on the algorithm described in [1]_.
+
+def generate_setcovs(rng: np.random.RandomState):
+    """Generates set covering problem instances in accordance with our data generation scheme.
+
+    This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (500x1000).
+    Moreover, it generates three set of 100 instances each for evaluation, with dimensions 500x1000 (Easy),
+    1000x1000 (Medium), and 2000x1000 (Hard).
+
+    :param rng: A random number generator.
+    """
+
+    filepaths = []
+    rows = []
+
+    # Training instances (500x1000).
+    n_instances = 10000
+    n_rows = 500
+    lp_dir = f'data/instances/setcover/train_{n_rows}r'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    rows.extend([n_rows] * n_instances)
+
+    # Validation instances (500x1000).
+    n_instances = 2000
+    n_rows = 500
+    lp_dir = f'data/instances/setcover/valid_{n_rows}r'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    rows.extend([n_rows] * n_instances)
+
+    # Testing instances (500x1000).
+    n_instances = 2000
+    n_rows = 500
+    lp_dir = f'data/instances/setcover/test_{n_rows}r'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    rows.extend([n_rows] * n_instances)
+
+    # Easy evaluation instances (500x1000).
+    n_instances = 100
+    n_rows = 500
+    lp_dir = f'data/instances/setcover/eval_{n_rows}r'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    rows.extend([n_rows] * n_instances)
+
+    # Medium evaluation instances (1000x1000).
+    n_instances = 100
+    n_rows = 1000
+    lp_dir = f'data/instances/setcover/eval_{n_rows}r'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    rows.extend([n_rows] * n_instances)
+
+    # Hard evaluation instances (2000x1000).
+    n_instances = 100
+    n_rows = 2000
+    lp_dir = f'data/instances/setcover/eval_{n_rows}r'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    rows.extend([n_rows] * n_instances)
+
+    # Actually generate the instances.
+    for filepath, n_rows in zip(filepaths, rows):
+        generate_setcov(n_rows, filepath, rng)
+
+
+def generate_setcov(n_rows: int, filepath: str, rng: np.random.RandomState, n_cols=1000, density=0.05, max_coef=100):
+    """Generates a set covering problem instance and writes it to a CPLEX LP file.
+
+    This method is based on the algorithm described in [1]_, and randomly creates a coefficient matrix with the
+    desired density, subject to the requirement that every row has at least two non-zero entries, and each column has
+    at least one.
 
     References
     ==========
@@ -164,12 +248,11 @@ def generate_setcov(n_rows: int, n_cols: int, density: float, filepath: str, rng
         https://doi.org/10.1007/BFB0120886
 
     :param n_rows: The desired number of rows.
+    :param filepath: The desired save file path.
+    :param rng: A random number generator.
     :param n_cols: The desired number of columns.
-    :param density: The desired density of the constraint matrix (fraction of non-zero elements), in range [0, 1].
-    :param filepath: Save file path.
-    :param rng: Random number generator.
-    :param max_coef: Maximum objective coefficient (>=1).
-    :return:
+    :param density: The desired density of the constraint matrix (fraction of non-zero elements), in interval [0, 1].
+    :param max_coef: The maximum objective coefficient (>=1).
     """
 
     n_nonzero = int(n_rows * n_cols * density)
@@ -196,7 +279,7 @@ def generate_setcov(n_rows: int, n_cols: int, density: float, filepath: str, rng
             # Assign all non-zero elements that are not yet fixed to rows that have not yet been chosen for this column.
             remaining_rows = np.setdiff1d(np.arange(n_rows), indices[i:n_rows], assume_unique=True)
             indices[n_rows:i + count] = rng.choice(remaining_rows, size=i + count - n_rows, replace=False)
-        i += n
+        i += count
         indptr.append(i)
 
     # Draw objective coefficients from {1, 2, ..., max_coef}.
@@ -222,173 +305,247 @@ def generate_setcov(n_rows: int, n_cols: int, density: float, filepath: str, rng
         file.write("".join([f" x{j + 1}" for j in range(n_cols)]))
 
 
-def generate_combauc(random, filename, n_items=100, n_bids=500, min_value=1, max_value=100, value_deviation=0.5,
-                     add_item_prob=0.7, max_n_sub_bids=5, additivity=0.2, budget_factor=1.5, resale_factor=0.5,
-                     integers=False, warnings=False):
-    """
-    Generate a Combinatorial Auction problem following the 'arbitrary' scheme found in section 4.3. of
-        Kevin Leyton-Brown, Mark Pearson, and Yoav Shoham. (2000).
-        Towards a universal test suite for combinatorial auction algorithms.
-        Proceedings of ACM Conference on Electronic Commerce (EC-00) 66-76.
-    Saves it as a CPLEX LP file.
-    Parameters
-    ----------
-    random : numpy.random.RandomState
-        A random number generator.
-    filename : str
-        Path to the file to save.
-    n_items : int
-        The number of items.
-    n_bids : int
-        The number of bids.
-    min_value : int
-        The minimum resale value for an item.
-    max_value : int
-        The maximum resale value for an item.
-    value_deviation : int
-        The deviation allowed for each bidder's private value of an item, relative from max_value.
-    add_item_prob : float in [0, 1]
-        The probability of adding a new item to an existing bundle.
-    max_n_sub_bids : int
-        The maximum number of substitutable bids per bidder (+1 gives the maximum number of bids per bidder).
-    additivity : float
-        Additivity parameter for bundle prices. Note that additivity < 0 gives sub-additive bids, while additivity >
-        0 gives super-additive bids.
-    budget_factor : float
-        The budget factor for each bidder, relative to their initial bid's price.
-    resale_factor : float
-        The resale factor for each bidder, relative to their initial bid's resale value.
-    integers : logical
-        Should bid's prices be integral ?
-    warnings : logical
-        Should warnings be printed ?
+def generate_combaucs(rng: np.random.RandomState):
+    """Generates combinatorial auction problem instances in accordance with our data generation scheme.
+
+    This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (100x500).
+    Moreover, it generates three set of 100 instances each for evaluation, with dimensions 100x500 (Easy),
+    200x1000 (Medium), and 300x1500 (Hard).
+
+    :param rng: A random number generator.
     """
 
-    assert min_value >= 0 and max_value >= min_value
-    assert add_item_prob >= 0 and add_item_prob <= 1
+    filepaths = []
+    items = []
+    bids = []
 
-    def choose_next_item(bundle_mask, interests, compats, add_item_prob, random):
-        n_items = len(interests)
-        prob = (1 - bundle_mask) * interests * compats[bundle_mask, :].mean(axis=0)
-        prob /= prob.sum()
-        return random.choice(n_items, p=prob)
+    # Training instances (100x500).
+    n_instances = 10000
+    n_items = 100
+    n_bids = 500
+    lp_dir = f'data/instances/cauctions/train_{n_items}i_{n_bids}b'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    items.extend([n_items] * n_instances)
+    bids.extend([n_bids] * n_instances)
 
-    # common item values (resale price)
-    values = min_value + (max_value - min_value) * random.rand(n_items)
+    # Validation instances (100x500).
+    n_instances = 2000
+    n_items = 100
+    n_bids = 500
+    lp_dir = f'data/instances/cauctions/valid_{n_items}i_{n_bids}b'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    items.extend([n_items] * n_instances)
+    bids.extend([n_bids] * n_instances)
 
-    # item compatibilities
-    compats = np.triu(random.rand(n_items, n_items), k=1)
-    compats = compats + compats.transpose()
-    compats = compats / compats.sum(1)
+    # Test instances (100x500).
+    n_instances = 2000
+    n_items = 100
+    n_bids = 500
+    lp_dir = f'data/instances/cauctions/test_{n_items}i_{n_bids}b'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    items.extend([n_items] * n_instances)
+    bids.extend([n_bids] * n_instances)
+
+    # Easy evaluation instances (100x500).
+    n_instances = 100
+    n_items = 100
+    n_bids = 500
+    lp_dir = f'data/instances/cauctions/eval_{n_items}i_{n_bids}b'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    items.extend([n_items] * n_instances)
+    bids.extend([n_bids] * n_instances)
+
+    # Medium evaluation instances (200x1000).
+    n_instances = 100
+    n_items = 200
+    n_bids = 1000
+    lp_dir = f'data/instances/cauctions/eval_{n_items}i_{n_bids}b'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    items.extend([n_items] * n_instances)
+    bids.extend([n_bids] * n_instances)
+
+    # Hard evaluation instances (300x1500).
+    n_instances = 100
+    n_items = 300
+    n_bids = 1500
+    lp_dir = f'data/instances/cauctions/eval_{n_items}i_{n_bids}b'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    items.extend([n_items] * n_instances)
+    bids.extend([n_bids] * n_instances)
+
+    # Actually generate the instances.
+    for n_items, n_bids, filepath in zip(items, bids, filepaths):
+        generate_combauc(n_items, n_bids, filepath, rng)
+
+
+def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.RandomState, min_value=1, max_value=100,
+                     max_deviation=0.5, add_prob=0.7, max_sub_bids=5, additivity=0.2, budget_factor=1.5,
+                     resale_factor=0.5, integers=False):
+    """Generates a combinatorial auction problem instance and writes it to a CPLEX LP file.
+
+    This method iteratively generates bids, based on the algorithm described in Section 4.3 of [1]_. First,
+    we generate common resale values for each good from the interval [*min_value, max_value*). Then, we generate
+    compatibilities between goods (the prior probability that they appear together in a bundle). Then,
+    for each bidder we randomly generate the deviation from the common resale price by multiplying *max_value *
+    max_deviation* by the bidder interests that are randomly generated from :math:`U(0, 1)`. Then, an initial bundle
+    is constructed by first taking a random item with probability proportional to the bidder interests. We now keep
+    randomly adding items based on add_prob with probabilities proportional to the item compatibility with items
+    already present in the bundle, and the bidder's private valuation of the item. The bid for this bundle is then
+    computed by adding an additivity term :math:`n^{(1 + additivity)}` to the bidder's private valuation of the
+    items, where *n* denotes the size of the bundle. Finally, we generate a maximum of *max_sub_bids* bids that are
+    substitutable for the original bid, provided that each of them requests at least one good from the original bid.
+    Bundles are substitutable if they fall within the bidder's budget (*price * budget_factor*) and above the minimum
+    resale value (*price * resale_factor*), where *price* denotes the bidder's initial bid.
+
+    References
+    ==========
+    .. [1] Leyton-Brown, K., Pearson, M., & Shoham, Y. (2000). Towards a universal test suite for combinatorial
+        auction algorithms. *Electronic Commerce (EC 2000)*, 66–76. https://doi.org/10.1145/352871
+
+    :param n_items: The desired number of items in auction.
+    :param n_bids: The desired number of bids.
+    :param filepath: The desired save file path.
+    :param rng: A random number generator.
+    :param min_value: The minimum resale value for an item.
+    :param max_value: The maximum resale value for an item.
+    :param max_deviation: The amount each bidder's private valuation of an item is allowed to deviate relative to
+        max_value.
+    :param add_prob: The probability of adding another item to a bundle on each iteration.
+    :param max_sub_bids: The maximum number of substitutable bids.
+    :param additivity: Additivity parameter for bundle prices, values >0 means that goods are complements and values
+        <0 implies that goods are substitutes.
+    :param budget_factor: The budget factor for each bidder, relative to their initial bid's price.
+    :param resale_factor: The resale factor for each bidder, relative to their initial bid's resale value.
+    :param integers: True if bid prices should be integer.
+    """
+
+    assert 0 <= min_value <= max_value
+    assert 0 <= add_prob <= 1
+
+    def choose_next(chosen: np.array, compat: np.array, interests: np.array, random: np.random.RandomState):
+        """Choose a next item with probabilities proportional to item compatibility with chosen items and a bidder's
+        interests.
+
+        :param chosen: A binary array where element i equals one of that item has been chosen already.
+        :param compat: Item compatibilities.
+        :param interests: The bidder's interests, an array of random numbers on the interval [0, 1).
+        :param random: A random number generator.
+        :return: The index of the chosen item.
+        """
+        items = len(interests)
+        p = (1 - chosen) * compat[chosen, :].mean(axis=0) * interests
+        p /= p.sum()
+        return random.choice(items, p=p)
+
+    # Randomly generate common resale values for each good between the minimum and maximum value.
+    values = min_value + (max_value - min_value) * rng.rand(n_items)
+
+    # Randomly generate item compatibilities (how likely goods are to appear together in a bundle).
+    compats = np.triu(rng.rand(n_items, n_items), k=1)  # Generate random upper triangle with zero diagonal.
+    compats = compats + compats.transpose()  # Make it symmetric (as compatibilities are symmetric).
+    compats = compats / compats.sum(1)  # Scale each column by the sum of its elements to form a probability.
 
     bids = []
     n_dummy_items = 0
 
-    # create bids, one bidder at a time
+    # Iteratively generate bids, one bidder at a time.
     while len(bids) < n_bids:
+        # Add random deviations in interval [-max_value * max_deviation, max_value * max_deviation).
+        bidder_interests = rng.rand(n_items)
+        private_values = values + max_value * max_deviation * (2 * bidder_interests - 1)
 
-        # bidder item values (buy price) and interests
-        private_interests = random.rand(n_items)
-        private_values = values + max_value * value_deviation * (2 * private_interests - 1)
+        # Generate an initial bundle, choosing first item according to bidder interests.
+        prob = bidder_interests / bidder_interests.sum()
+        item = rng.choice(n_items, p=prob)
+        chosen_items = np.full(n_items, 0)
+        chosen_items[item] = 1
 
-        # substitutable bids of this bidder
-        bidder_bids = {}
-
-        # generate initial bundle, choose first item according to bidder interests
-        prob = private_interests / private_interests.sum()
-        item = random.choice(n_items, p=prob)
-        bundle_mask = np.full(n_items, 0)
-        bundle_mask[item] = 1
-
-        # add additional items, according to bidder interests and item compatibilities
-        while random.rand() < add_item_prob:
-            # stop when bundle full (no item left)
-            if bundle_mask.sum() == n_items:
+        # Add additional items according to item compatibilities and bidder interests.
+        while rng.rand() < add_prob:
+            # Stop when there are no items left to choose from.
+            if chosen_items.sum() == n_items:
                 break
-            item = choose_next_item(bundle_mask, private_interests, compats, add_item_prob, random)
-            bundle_mask[item] = 1
+            item = choose_next(chosen_items, compats, bidder_interests, add_prob, rng)
+            chosen_items[item] = 1
+        bundle = np.nonzero(chosen_items)[0]
 
-        bundle = np.nonzero(bundle_mask)[0]
-
-        # compute bundle price with value additivity
+        # Compute bundle bid using value additivity.
         price = private_values[bundle].sum() + np.power(len(bundle), 1 + additivity)
         if integers:
             price = int(price)
 
-        # drop negativaly priced bundles
+        # Drop negatively priced bundles.
         if price < 0:
-            if warnings:
-                print("warning: negatively priced bundle avoided")
             continue
 
-        # bid on initial bundle
-        bidder_bids[frozenset(bundle)] = price
+        # Record bid on initial bundle.
+        bidder_bids = {frozenset(bundle): price}
 
-        # generate candidates substitutable bundles
+        # Generate candidate substitutable bundles.
         sub_candidates = []
         for item in bundle:
+            # Enforce that at least one item must be shared with initial bundle.
+            chosen_items = np.full(n_items, 0)
+            chosen_items[item] = 1
 
-            # at least one item must be shared with initial bundle
-            bundle_mask = np.full(n_items, 0)
-            bundle_mask[item] = 1
+            # Add additional items according to item compatibilities and bidder interests.
+            while chosen_items.sum() < len(bundle):
+                item = choose_next(chosen_items, compats, bidder_interests, add_prob, rng)
+                chosen_items[item] = 1
+            sub_bundle = np.nonzero(chosen_items)[0]
 
-            # add additional items, according to bidder interests and item compatibilities
-            while bundle_mask.sum() < len(bundle):
-                item = choose_next_item(bundle_mask, private_interests, compats, add_item_prob, random)
-                bundle_mask[item] = 1
-
-            sub_bundle = np.nonzero(bundle_mask)[0]
-
-            # compute bundle price with value additivity
+            # Compute bundle bid using value additivity.
             sub_price = private_values[sub_bundle].sum() + np.power(len(sub_bundle), 1 + additivity)
             if integers:
                 sub_price = int(sub_price)
-
             sub_candidates.append((sub_bundle, sub_price))
 
-        # filter valid candidates, higher priced candidates first
+        # Filter valid candidates, evaluating higher priced candidates first.
         budget = budget_factor * price
         min_resale_value = resale_factor * values[bundle].sum()
         for bundle, price in [sub_candidates[i] for i in np.argsort([-price for bundle, price in sub_candidates])]:
 
-            if len(bidder_bids) >= max_n_sub_bids + 1 or len(bids) + len(bidder_bids) >= n_bids:
+            # Stop when the maximum number of substitutable bids is reached, or the number of bids in general.
+            if len(bidder_bids) >= max_sub_bids + 1 or len(bids) + len(bidder_bids) >= n_bids:
                 break
 
+            # Drop negatively priced bundles.
             if price < 0:
-                if warnings:
-                    print("warning: negatively priced substitutable bundle avoided")
                 continue
 
+            # Drop bundles that the bidder cannot afford.
             if price > budget:
-                if warnings:
-                    print("warning: over priced substitutable bundle avoided")
                 continue
 
+            # Drop bundles that have a too low resale value.
             if values[bundle].sum() < min_resale_value:
-                if warnings:
-                    print("warning: substitutable bundle below min resale value avoided")
                 continue
 
+            # Drop duplicate bundles.
             if frozenset(bundle) in bidder_bids:
-                if warnings:
-                    print("warning: duplicated substitutable bundle avoided")
                 continue
 
             bidder_bids[frozenset(bundle)] = price
 
-        # add XOR constraint if needed (dummy item)
+        # Enforce XOR nature of substitute bids by including a dummy item.
         if len(bidder_bids) > 2:
             dummy_item = [n_items + n_dummy_items]
             n_dummy_items += 1
         else:
             dummy_item = []
 
-        # place bids
+        # Record bids.
         for bundle, price in bidder_bids.items():
             bids.append((list(bundle) + dummy_item, price))
 
-    # generate the LP file
-    with open(filename, 'w') as file:
+    # Write problem to CPLEX LP file.
+    with open(filepath, 'w') as file:
         bids_per_item = [[] for item in range(n_items + n_dummy_items)]
 
         file.write("maximize\nOBJ:")
@@ -410,52 +567,122 @@ def generate_combauc(random, filename, n_items=100, n_bids=500, min_value=1, max
             file.write(f" x{i + 1}")
 
 
-def generate_capfac(random, filename, n_customers, n_facilities, ratio):
-    """
-    Generate a Capacited Facility Location problem following
-        Cornuejols G, Sridharan R, Thizy J-M (1991)
-        A Comparison of Heuristics and Relaxations for the Capacitated Plant Location Problem.
-        European Journal of Operations Research 50:280-297.
-    Saves it as a CPLEX LP file.
-    Parameters
-    ----------
-    random : numpy.random.RandomState
-        A random number generator.
-    filename : str
-        Path to the file to save.
-    n_customers: int
-        The desired number of customers.
-    n_facilities: int
-        The desired number of facilities.
-    ratio: float
-        The desired capacity / demand ratio.
-    """
-    c_x = rng.rand(n_customers)
-    c_y = rng.rand(n_customers)
+def generate_capfacs(rng: np.random.RandomState):
+    """Generates capacitated facility problem instances in accordance with our data generation scheme.
 
+    This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (100x100).
+    Moreover, it generates three set of 100 instances each for evaluation, with dimensions 100x100 (Easy),
+    100x200 (Medium), and 100x400 (Hard).
+
+    :param rng: A random number generator.
+    """
+
+    filepaths = []
+    customers = []
+
+    # Training instances (100x100).
+    n_instances = 10000
+    n_customers = 100
+    lp_dir = f'data/instances/facilities/train_{n_customers}c'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    customers.extend([n_customers] * n_instances)
+
+    # Validation instances (100x100).
+    n_instances = 2000
+    n_customers = 100
+    lp_dir = f'data/instances/facilities/valid_{n_customers}c'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    customers.extend([n_customers] * n_instances)
+
+    # Testing instances (100x100).
+    n_instances = 2000
+    n_customers = 100
+    lp_dir = f'data/instances/facilities/test_{n_customers}c'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    customers.extend([n_customers] * n_instances)
+
+    # Easy evaluation instances (100x100).
+    n_instances = 100
+    n_customers = 100
+    lp_dir = f'data/instances/facilities/eval_{n_customers}c'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    customers.extend([n_customers] * n_instances)
+
+    # Medium evaluation instances (100x200).
+    n_instances = 100
+    n_customers = 200
+    lp_dir = f'data/instances/facilities/eval_{n_customers}c'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    customers.extend([n_customers] * n_instances)
+
+    # Hard evaluation instances (100x400).
+    n_instances = 100
+    n_customers = 400
+    lp_dir = f'data/instances/facilities/eval_{n_customers}c'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    customers.extend([n_customers] * n_instances)
+
+    # Actually generate the instances.
+    for n_customers, filepath in zip(customers, filepaths):
+        generate_capfac(n_customers, filepath, rng)
+
+
+def generate_capfac(n_customers, filepath, rng, n_facilities=100, ratio=5):
+    """Generates a capacitated facility problem instance and writes it to a CPLEX LP file.
+
+    This method randomly generates costs, capacities, demands, based on the algorithm described in [1]_. For this
+    purpose, we first randomly place facilities and customers on a 1x1 surface and multiply the Euclidian distance
+    between them by 10 to obtain unit cost of serving a customer from a particular facility. Then, demands are generated
+    from :math:`U(5, 35)`. Capacities :math:`s_j` are generated from :math:`U(10, 160)` and the fixed costs are
+    using the formula :math:`U(0, 90) + U(100, 110) \cdot \sqrt{s_j}`, to reflect economies of scale. Finally,
+    capacities are scaled to the desired capacity to demand ratio.
+
+    References
+    ==========
+    .. [1] Cornuejols, G., Sridharan, R., & Thizy, J. M. (1991). A comparison of heuristics and relaxations for the
+        capacitated plant location problem. *European Journal of Operational Research*, 50(3), 280–297.
+        https://doi.org/10.1016/0377-2217(91)90261-S
+
+    :param n_customers: The desired number of customers.
+    :param filepath: The desired save file path.
+    :param rng: A random number generator.
+    :param n_facilities: The desired number of facilities.
+    :param ratio: The desired capacity to demand ratio.
+    """
+
+    # Randomly place facilities on a 1x1 surface.
     f_x = rng.rand(n_facilities)
     f_y = rng.rand(n_facilities)
 
-    demands = rng.randint(5, 35 + 1, size=n_customers)
+    # Randomly place customers on a 1x1 surface.
+    c_x = rng.rand(n_customers)
+    c_y = rng.rand(n_customers)
+
+    # Generate demand, capacities, and fixed costs.
+    demand = rng.randint(5, 35 + 1, size=n_customers)
     capacities = rng.randint(10, 160 + 1, size=n_facilities)
-    fixed_costs = rng.randint(100, 110 + 1, size=n_facilities) * np.sqrt(capacities) + rng.randint(90 + 1,
-                                                                                                   size=n_facilities)
+    fixed_costs = rng.randint(90 + 1, size=n_facilities) + rng.randint(100, 110 + 1, size=n_facilities)
     fixed_costs = fixed_costs.astype(int)
 
-    total_demand = demands.sum()
+    total_demand = demand.sum()
     total_capacity = capacities.sum()
 
-    # adjust capacities according to ratio
+    # Adjust capacities according to desired capacity to demand ratio.
     capacities = capacities * ratio * total_demand / total_capacity
     capacities = capacities.astype(int)
-    total_capacity = capacities.sum()
 
-    # transportation costs
+    # Compute (total) transportation costs.
     trans_costs = np.sqrt((c_x.reshape((-1, 1)) - f_x.reshape((1, -1))) ** 2 + (
-            c_y.reshape((-1, 1)) - f_y.reshape((1, -1))) ** 2) * 10 * demands.reshape((-1, 1))
+            c_y.reshape((-1, 1)) - f_y.reshape((1, -1))) ** 2) * 10 * demand.reshape((-1, 1))
 
-    # write problem
-    with open(filename, 'w') as file:
+    # Write problem to CPLEX LP file.
+    with open(filepath, 'w') as file:
         file.write("minimize\nobj:")
         file.write("".join(
             [f" +{trans_costs[i, j]} x_{i + 1}_{j + 1}" for i in range(n_customers) for j in range(n_facilities)]))
@@ -466,10 +693,10 @@ def generate_capfac(random, filename, n_customers, n_facilities, ratio):
             file.write(
                 f"demand_{i + 1}:" + "".join([f" -1 x_{i + 1}_{j + 1}" for j in range(n_facilities)]) + f" <= -1\n")
         for j in range(n_facilities):
-            file.write(f"capacity_{j + 1}:" + "".join([f" +{demands[i]} x_{i + 1}_{j + 1}" for i in
+            file.write(f"capacity_{j + 1}:" + "".join([f" +{demand[i]} x_{i + 1}_{j + 1}" for i in
                                                        range(n_customers)]) + f" -{capacities[j]} y_{j + 1} <= 0\n")
 
-        # optional constraints for LP relaxation tightening
+        # Optional constraints for LP relaxation tightening.
         file.write("total_capacity:" + "".join(
             [f" -{capacities[j]} y_{j + 1}" for j in range(n_facilities)]) + f" <= -{total_demand}\n")
         for i in range(n_customers):
@@ -485,24 +712,107 @@ def generate_capfac(random, filename, n_customers, n_facilities, ratio):
         file.write("".join([f" y_{j + 1}" for j in range(n_facilities)]))
 
 
-def generate_indset(graph, filepath):
-    """Generates a maximum independent set problem instance and writes to CPLEX LP file.
+def generate_indsets(rng: np.random.RandomState):
+    """Generates independent set problem instances in accordance with our data generation scheme.
 
-    :param graph: The graph from which to build the independent set problem.
-    :param filepath: Save file path.
+    This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (500 nodes).
+    Moreover, it generates three set of 100 instances each for evaluation, with 500 (Easy), 1000 (Medium),
+    and 1500 (Hard) nodes.
+
+    :param rng: A random number generator.
     """
 
+    filepaths = []
+    nodes = []
+
+    # Training instances (500 nodes).
+    n_instances = 10000
+    n_nodes = 500
+    lp_dir = f'data/instances/indset/train_{n_nodes}n'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    nodes.extend([n_nodes] * n_instances)
+
+    # Validation instances (500 nodes).
+    n_instances = 2000
+    n_nodes = 500
+    lp_dir = f'data/instances/indset/valid_{n_nodes}n'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    nodes.extend([n_nodes] * n_instances)
+
+    # Testing instances (500 nodes).
+    n_instances = 2000
+    n_nodes = 500
+    lp_dir = f'data/instances/indset/test_{n_nodes}n'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    nodes.extend([n_nodes] * n_instances)
+
+    # Easy evaluation instances (500 nodes).
+    n_instances = 100
+    n_nodes = 500
+    lp_dir = f'data/instances/indset/eval_{n_nodes}n'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    nodes.extend([n_nodes] * n_instances)
+
+    # Medium evaluation instances (1000 nodes).
+    n_instances = 100
+    n_nodes = 1000
+    lp_dir = f'data/instances/indset/eval_{n_nodes}n'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    nodes.extend([n_nodes] * n_instances)
+
+    # Hard evaluation instances (1500 nodes).
+    n_instances = 100
+    n_nodes = 1500
+    lp_dir = f'data/instances/indset/eval_{n_nodes}n'
+    os.makedirs(lp_dir)
+    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
+    nodes.extend([n_nodes] * n_instances)
+
+    # Actually generate the instances.
+    for n_nodes, filepath in zip(nodes, filepaths):
+        graph = Graph.barabasi_albert(n_nodes, rng)
+        generate_indset(graph, filepath)
+
+
+def generate_indset(graph, filepath):
+    """Generates a maximum independent set problem instance and writes it to a CPLEX LP file.
+
+    This method generates the maximum independent set problem using a previously generated graph, based on the
+    algorithm described in [ 1]_. For this purpose, we start by noting that one can only select a single node from
+    any two nodes that are connected by an edge. While this is a valid formulation for our problem, we can strengthen
+    it by noting that if we have a clique *S* (a fully-connected set), any independent set can only pick at most one
+    node from *S*. For each clique, we can therefore add the constraint that we may only pick a single node from it,
+    and remove all previously added constraints for edges in the clique.
+
+    References
+    ==========
+    .. [1] Bergman, D., Cire, A. A., Van Hoeve, W.-J., & Hooker, J. (2016). *Decision diagrams for optimization*.
+        Springer. https://doi.org/10.1007/978-3-319-42849-9
+
+    :param graph: The graph from which to build the independent set problem.
+    :param filepath: The desired save file path.
+    """
+
+    # Partition graph into cliques.
     cliques = graph.clique_partition()
+
     inequalities = set(graph.edges)
     for clique in cliques:
         clique = tuple(sorted(clique))
+
+        # Remove all redundant edge constraints.
         for edge in combinations(clique, 2):
             inequalities.remove(edge)
         if len(clique) > 1:
+            # Add an inequality specifying we can only select a single node from the clique.
             inequalities.add(clique)
 
-    # Put trivial inequalities for nodes that didn't appear
-    # in the constraints, otherwise SCIP will complain
+    # Put trivial inequalities for nodes that didn't appear in the constraints, otherwise SCIP will complain.
     used_nodes = set()
     for group in inequalities:
         used_nodes.update(group)
@@ -510,328 +820,10 @@ def generate_indset(graph, filepath):
         if node not in used_nodes:
             inequalities.add((node,))
 
-    with open(filename, 'w') as lp_file:
+    # Write problem to CPLEX LP file.
+    with open(filepath, 'w') as lp_file:
         lp_file.write("maximize\nOBJ:" + "".join([f" + 1 x{node + 1}" for node in range(len(graph))]) + "\n")
         lp_file.write("\nsubject to\n")
         for count, group in enumerate(inequalities):
             lp_file.write(f"C{count + 1}:" + "".join([f" + x{node + 1}" for node in sorted(group)]) + " <= 1\n")
         lp_file.write("\nbinary\n" + " ".join([f"x{node + 1}" for node in range(len(graph))]) + "\n")
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('problem', help='MILP instance type to process.',
-                        choices=['setcover', 'cauctions', 'facilities', 'indset'], )
-    # parser.add_argument('-s', '--seed', help='Random generator seed (default 0).', type=utilities.valid_seed,
-    #                    default=0, )
-    args = parser.parse_args()
-
-    rng = np.random.RandomState(args.seed)
-
-    if args.problem == 'setcover':
-        nrows = 500
-        ncols = 1000
-        dens = 0.05
-        max_coef = 100
-
-        filenames = []
-        nrowss = []
-        ncolss = []
-        denss = []
-
-        # train instances
-        n = 10000
-        lp_dir = f'data/instances/setcover/train_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
-
-        # validation instances
-        n = 2000
-        lp_dir = f'data/instances/setcover/valid_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
-
-        # small transfer instances
-        n = 100
-        nrows = 500
-        lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
-
-        # medium transfer instances
-        n = 100
-        nrows = 1000
-        lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
-
-        # big transfer instances
-        n = 100
-        nrows = 2000
-        lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
-
-        # test instances
-        n = 2000
-        nrows = 500
-        ncols = 1000
-        lp_dir = f'data/instances/setcover/test_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
-
-        # actually generate the instances
-        for filename, nrows, ncols, dens in zip(filenames, nrowss, ncolss, denss):
-            print(f'  generating file {filename} ...')
-            generate_setcov(nrows=nrows, ncols=ncols, density=dens, filename=filename, rng=rng, max_coef=max_coef)
-
-        print('done.')
-
-    elif args.problem == 'indset':
-        number_of_nodes = 500
-        affinity = 4
-
-        filenames = []
-        nnodess = []
-
-        # train instances
-        n = 10000
-        lp_dir = f'data/instances/indset/train_{number_of_nodes}_{affinity}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nnodess.extend([number_of_nodes] * n)
-
-        # validation instances
-        n = 2000
-        lp_dir = f'data/instances/indset/valid_{number_of_nodes}_{affinity}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nnodess.extend([number_of_nodes] * n)
-
-        # small transfer instances
-        n = 100
-        number_of_nodes = 500
-        lp_dir = f'data/instances/indset/transfer_{number_of_nodes}_{affinity}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nnodess.extend([number_of_nodes] * n)
-
-        # medium transfer instances
-        n = 100
-        number_of_nodes = 1000
-        lp_dir = f'data/instances/indset/transfer_{number_of_nodes}_{affinity}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nnodess.extend([number_of_nodes] * n)
-
-        # big transfer instances
-        n = 100
-        number_of_nodes = 1500
-        lp_dir = f'data/instances/indset/transfer_{number_of_nodes}_{affinity}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nnodess.extend([number_of_nodes] * n)
-
-        # test instances
-        n = 2000
-        number_of_nodes = 500
-        lp_dir = f'data/instances/indset/test_{number_of_nodes}_{affinity}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nnodess.extend([number_of_nodes] * n)
-
-        # actually generate the instances
-        for filename, nnodes in zip(filenames, nnodess):
-            print(f"  generating file {filename} ...")
-            graph = Graph.barabasi_albert(nnodes, affinity, rng)
-            generate_indset(graph, filename)
-
-        print("done.")
-
-    elif args.problem == 'cauctions':
-        number_of_items = 100
-        number_of_bids = 500
-        filenames = []
-        nitemss = []
-        nbidss = []
-
-        # train instances
-        n = 10000
-        lp_dir = f'data/instances/cauctions/train_{number_of_items}_{number_of_bids}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nitemss.extend([number_of_items] * n)
-        nbidss.extend([number_of_bids] * n)
-
-        # validation instances
-        n = 2000
-        lp_dir = f'data/instances/cauctions/valid_{number_of_items}_{number_of_bids}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nitemss.extend([number_of_items] * n)
-        nbidss.extend([number_of_bids] * n)
-
-        # small transfer instances
-        n = 100
-        number_of_items = 100
-        number_of_bids = 500
-        lp_dir = f'data/instances/cauctions/transfer_{number_of_items}_{number_of_bids}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nitemss.extend([number_of_items] * n)
-        nbidss.extend([number_of_bids] * n)
-
-        # medium transfer instances
-        n = 100
-        number_of_items = 200
-        number_of_bids = 1000
-        lp_dir = f'data/instances/cauctions/transfer_{number_of_items}_{number_of_bids}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nitemss.extend([number_of_items] * n)
-        nbidss.extend([number_of_bids] * n)
-
-        # big transfer instances
-        n = 100
-        number_of_items = 300
-        number_of_bids = 1500
-        lp_dir = f'data/instances/cauctions/transfer_{number_of_items}_{number_of_bids}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nitemss.extend([number_of_items] * n)
-        nbidss.extend([number_of_bids] * n)
-
-        # test instances
-        n = 2000
-        number_of_items = 100
-        number_of_bids = 500
-        lp_dir = f'data/instances/cauctions/test_{number_of_items}_{number_of_bids}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        nitemss.extend([number_of_items] * n)
-        nbidss.extend([number_of_bids] * n)
-
-        # actually generate the instances
-        for filename, nitems, nbids in zip(filenames, nitemss, nbidss):
-            print(f"  generating file {filename} ...")
-            generate_combauc(rng, filename, n_items=nitems, n_bids=nbids, add_item_prob=0.7)
-
-        print("done.")
-
-    elif args.problem == 'facilities':
-        number_of_customers = 100
-        number_of_facilities = 100
-        ratio = 5
-        filenames = []
-        ncustomerss = []
-        nfacilitiess = []
-        ratios = []
-
-        # train instances
-        n = 10000
-        lp_dir = f'data/instances/facilities/train_{number_of_customers}_{number_of_facilities}_{ratio}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        ncustomerss.extend([number_of_customers] * n)
-        nfacilitiess.extend([number_of_facilities] * n)
-        ratios.extend([ratio] * n)
-
-        # validation instances
-        n = 2000
-        lp_dir = f'data/instances/facilities/valid_{number_of_customers}_{number_of_facilities}_{ratio}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        ncustomerss.extend([number_of_customers] * n)
-        nfacilitiess.extend([number_of_facilities] * n)
-        ratios.extend([ratio] * n)
-
-        # small transfer instances
-        n = 100
-        number_of_customers = 100
-        number_of_facilities = 100
-        lp_dir = f'data/instances/facilities/transfer_{number_of_customers}_{number_of_facilities}_{ratio}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        ncustomerss.extend([number_of_customers] * n)
-        nfacilitiess.extend([number_of_facilities] * n)
-        ratios.extend([ratio] * n)
-
-        # medium transfer instances
-        n = 100
-        number_of_customers = 200
-        lp_dir = f'data/instances/facilities/transfer_{number_of_customers}_{number_of_facilities}_{ratio}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        ncustomerss.extend([number_of_customers] * n)
-        nfacilitiess.extend([number_of_facilities] * n)
-        ratios.extend([ratio] * n)
-
-        # big transfer instances
-        n = 100
-        number_of_customers = 400
-        lp_dir = f'data/instances/facilities/transfer_{number_of_customers}_{number_of_facilities}_{ratio}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        ncustomerss.extend([number_of_customers] * n)
-        nfacilitiess.extend([number_of_facilities] * n)
-        ratios.extend([ratio] * n)
-
-        # test instances
-        n = 2000
-        number_of_customers = 100
-        number_of_facilities = 100
-        lp_dir = f'data/instances/facilities/test_{number_of_customers}_{number_of_facilities}_{ratio}'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n)])
-        ncustomerss.extend([number_of_customers] * n)
-        nfacilitiess.extend([number_of_facilities] * n)
-        ratios.extend([ratio] * n)
-
-        # actually generate the instances
-        for filename, ncs, nfs, r in zip(filenames, ncustomerss, nfacilitiess, ratios):
-            print(f"  generating file {filename} ...")
-            generate_capfac(rng, filename, n_customers=ncs, n_facilities=nfs, ratio=r)
-
-        print("done.")
