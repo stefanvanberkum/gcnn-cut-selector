@@ -30,9 +30,6 @@ import numpy as np
 import scipy.sparse
 
 
-# import utilities
-
-
 class Graph:
     """Data structure for a generic graph with methods for random graph generation.
 
@@ -48,7 +45,7 @@ class Graph:
     :ivar neighbors: A dictionary that records the neighbors of each node in the graph.
     """
 
-    def __init__(self, n_nodes: int, edges: set[tuple[int, int]], degrees: np.array[int], neighbors: dict[set[int]]):
+    def __init__(self, n_nodes: int, edges: set[tuple[int, int]], degrees: np.array, neighbors: dict[set[int]]):
         self.n_nodes = n_nodes
         self.edges = edges
         self.degrees = degrees
@@ -471,7 +468,7 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ra
             # Stop when there are no items left to choose from.
             if chosen_items.sum() == n_items:
                 break
-            item = choose_next(chosen_items, compats, bidder_interests, add_prob, rng)
+            item = choose_next(chosen_items, compats, bidder_interests, rng)
             chosen_items[item] = 1
         bundle = np.nonzero(chosen_items)[0]
 
@@ -496,7 +493,7 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ra
 
             # Add additional items according to item compatibilities and bidder interests.
             while chosen_items.sum() < len(bundle):
-                item = choose_next(chosen_items, compats, bidder_interests, add_prob, rng)
+                item = choose_next(chosen_items, compats, bidder_interests, rng)
                 chosen_items[item] = 1
             sub_bundle = np.nonzero(chosen_items)[0]
 
