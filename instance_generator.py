@@ -3,7 +3,7 @@
 Summary
 =======
 This module provides methods for randomly generated set covering, combinatorial auction, capacitated facility location,
-and maximum independent set problem instances. The methods in this module are all based on [1]_.
+and maximum independent set problem instances. The methods in this module are based on [1]_.
 
 Classes
 ========
@@ -18,8 +18,8 @@ Functions
 
 References
 ==========
-.. [1] Gasse, M., Chételat, D., Ferroni, N., Charlin, L., & Lodi, A. (2019). *Exact combinatorial optimization with
-    graph convolutional neural networks*. Neural Information Processing Systems (NeurIPS 2019), 15580–15592.
+.. [1] Gasse, M., Chételat, D., Ferroni, N., Charlin, L., & Lodi, A. (2019). Exact combinatorial optimization with
+    graph convolutional neural networks. *Neural Information Processing Systems (NeurIPS 2019)*, 15580–15592.
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
 
@@ -155,9 +155,10 @@ class Graph:
 
 
 def generate_instances():
-    """Generates set covering, combinatorial auction, capacitated facility, and independent set problem instances in
-    accordance with our data generation scheme.
+    """Generates set covering, combinatorial auction, capacitated facility location, and independent set problem
+    instances in accordance with our data generation scheme.
     """
+
     rng = np.random.RandomState(0)
     generate_setcovs(rng)
     generate_combaucs(rng)
@@ -181,7 +182,7 @@ def generate_setcovs(rng: np.random.RandomState):
     # Training instances (500x1000).
     n_instances = 10000
     n_rows = 500
-    lp_dir = f'data/instances/setcover/train_{n_rows}r'
+    lp_dir = f'data/instances/setcov/train_{n_rows}r'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     rows.extend([n_rows] * n_instances)
@@ -189,7 +190,7 @@ def generate_setcovs(rng: np.random.RandomState):
     # Validation instances (500x1000).
     n_instances = 2000
     n_rows = 500
-    lp_dir = f'data/instances/setcover/valid_{n_rows}r'
+    lp_dir = f'data/instances/setcov/valid_{n_rows}r'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     rows.extend([n_rows] * n_instances)
@@ -197,7 +198,7 @@ def generate_setcovs(rng: np.random.RandomState):
     # Testing instances (500x1000).
     n_instances = 2000
     n_rows = 500
-    lp_dir = f'data/instances/setcover/test_{n_rows}r'
+    lp_dir = f'data/instances/setcov/test_{n_rows}r'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     rows.extend([n_rows] * n_instances)
@@ -205,7 +206,7 @@ def generate_setcovs(rng: np.random.RandomState):
     # Easy evaluation instances (500x1000).
     n_instances = 100
     n_rows = 500
-    lp_dir = f'data/instances/setcover/eval_{n_rows}r'
+    lp_dir = f'data/instances/setcov/eval_{n_rows}r'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     rows.extend([n_rows] * n_instances)
@@ -213,7 +214,7 @@ def generate_setcovs(rng: np.random.RandomState):
     # Medium evaluation instances (1000x1000).
     n_instances = 100
     n_rows = 1000
-    lp_dir = f'data/instances/setcover/eval_{n_rows}r'
+    lp_dir = f'data/instances/setcov/eval_{n_rows}r'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     rows.extend([n_rows] * n_instances)
@@ -221,7 +222,7 @@ def generate_setcovs(rng: np.random.RandomState):
     # Hard evaluation instances (2000x1000).
     n_instances = 100
     n_rows = 2000
-    lp_dir = f'data/instances/setcover/eval_{n_rows}r'
+    lp_dir = f'data/instances/setcov/eval_{n_rows}r'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     rows.extend([n_rows] * n_instances)
@@ -290,15 +291,15 @@ def generate_setcov(n_rows: int, filepath: str, rng: np.random.RandomState, n_co
 
     # Write problem to CPLEX LP file.
     with open(filepath, 'w') as file:
-        file.write("minimize\nOBJ:")
+        file.write("MINIMIZE\n obj:")
         file.write("".join([f" +{c[j]} x{j + 1}" for j in range(n_cols)]))
 
-        file.write("\n\nsubject to\n")
+        file.write("\n\nSUBJECT TO\n")
         for i in range(n_rows):
             row_cols_str = "".join([f" +1 x{j + 1}" for j in indices[indptr[i]:indptr[i + 1]]])
-            file.write(f"C{i}:" + row_cols_str + f" >= 1\n")
+            file.write(f" c{i + 1}:" + row_cols_str + f" >= 1\n")
 
-        file.write("\nbinary\n")
+        file.write("\nBINARY\n")
         file.write("".join([f" x{j + 1}" for j in range(n_cols)]))
 
 
@@ -320,7 +321,7 @@ def generate_combaucs(rng: np.random.RandomState):
     n_instances = 10000
     n_items = 100
     n_bids = 500
-    lp_dir = f'data/instances/cauctions/train_{n_items}i_{n_bids}b'
+    lp_dir = f'data/instances/combauc/train_{n_items}i_{n_bids}b'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     items.extend([n_items] * n_instances)
@@ -330,7 +331,7 @@ def generate_combaucs(rng: np.random.RandomState):
     n_instances = 2000
     n_items = 100
     n_bids = 500
-    lp_dir = f'data/instances/cauctions/valid_{n_items}i_{n_bids}b'
+    lp_dir = f'data/instances/combauc/valid_{n_items}i_{n_bids}b'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     items.extend([n_items] * n_instances)
@@ -340,7 +341,7 @@ def generate_combaucs(rng: np.random.RandomState):
     n_instances = 2000
     n_items = 100
     n_bids = 500
-    lp_dir = f'data/instances/cauctions/test_{n_items}i_{n_bids}b'
+    lp_dir = f'data/instances/combauc/test_{n_items}i_{n_bids}b'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     items.extend([n_items] * n_instances)
@@ -350,7 +351,7 @@ def generate_combaucs(rng: np.random.RandomState):
     n_instances = 100
     n_items = 100
     n_bids = 500
-    lp_dir = f'data/instances/cauctions/eval_{n_items}i_{n_bids}b'
+    lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     items.extend([n_items] * n_instances)
@@ -360,7 +361,7 @@ def generate_combaucs(rng: np.random.RandomState):
     n_instances = 100
     n_items = 200
     n_bids = 1000
-    lp_dir = f'data/instances/cauctions/eval_{n_items}i_{n_bids}b'
+    lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     items.extend([n_items] * n_instances)
@@ -370,7 +371,7 @@ def generate_combaucs(rng: np.random.RandomState):
     n_instances = 100
     n_items = 300
     n_bids = 1500
-    lp_dir = f'data/instances/cauctions/eval_{n_items}i_{n_bids}b'
+    lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     items.extend([n_items] * n_instances)
@@ -545,27 +546,29 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ra
     with open(filepath, 'w') as file:
         bids_per_item = [[] for item in range(n_items + n_dummy_items)]
 
-        file.write("maximize\nOBJ:")
+        file.write("MAXIMIZE\n obj:")
         for i, bid in enumerate(bids):
             bundle, price = bid
             file.write(f" +{price} x{i + 1}")
             for item in bundle:
                 bids_per_item[item].append(i)
 
-        file.write("\n\nsubject to\n")
-        for item_bids in bids_per_item:
+        file.write("\n\nSUBJECT TO\n")
+        for i in range(len(bids_per_item)):
+            item_bids = bids_per_item[i]
             if item_bids:
-                for i in item_bids:
-                    file.write(f" +1 x{i + 1}")
+                file.write(f" c{i + 1}:")
+                for j in item_bids:
+                    file.write(f" +1 x{j + 1}")
                 file.write(f" <= 1\n")
 
-        file.write("\nbinary\n")
+        file.write("\nBINARY\n")
         for i in range(len(bids)):
             file.write(f" x{i + 1}")
 
 
 def generate_capfacs(rng: np.random.RandomState):
-    """Generates capacitated facility problem instances in accordance with our data generation scheme.
+    """Generates capacitated facility location problem instances in accordance with our data generation scheme.
 
     This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (100x100).
     Moreover, it generates three set of 100 instances each for evaluation, with dimensions 100x100 (Easy),
@@ -580,7 +583,7 @@ def generate_capfacs(rng: np.random.RandomState):
     # Training instances (100x100).
     n_instances = 10000
     n_customers = 100
-    lp_dir = f'data/instances/facilities/train_{n_customers}c'
+    lp_dir = f'data/instances/capfac/train_{n_customers}c'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     customers.extend([n_customers] * n_instances)
@@ -588,7 +591,7 @@ def generate_capfacs(rng: np.random.RandomState):
     # Validation instances (100x100).
     n_instances = 2000
     n_customers = 100
-    lp_dir = f'data/instances/facilities/valid_{n_customers}c'
+    lp_dir = f'data/instances/capfac/valid_{n_customers}c'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     customers.extend([n_customers] * n_instances)
@@ -596,7 +599,7 @@ def generate_capfacs(rng: np.random.RandomState):
     # Testing instances (100x100).
     n_instances = 2000
     n_customers = 100
-    lp_dir = f'data/instances/facilities/test_{n_customers}c'
+    lp_dir = f'data/instances/capfac/test_{n_customers}c'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     customers.extend([n_customers] * n_instances)
@@ -604,7 +607,7 @@ def generate_capfacs(rng: np.random.RandomState):
     # Easy evaluation instances (100x100).
     n_instances = 100
     n_customers = 100
-    lp_dir = f'data/instances/facilities/eval_{n_customers}c'
+    lp_dir = f'data/instances/capfac/eval_{n_customers}c'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     customers.extend([n_customers] * n_instances)
@@ -612,7 +615,7 @@ def generate_capfacs(rng: np.random.RandomState):
     # Medium evaluation instances (100x200).
     n_instances = 100
     n_customers = 200
-    lp_dir = f'data/instances/facilities/eval_{n_customers}c'
+    lp_dir = f'data/instances/capfac/eval_{n_customers}c'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     customers.extend([n_customers] * n_instances)
@@ -620,7 +623,7 @@ def generate_capfacs(rng: np.random.RandomState):
     # Hard evaluation instances (100x400).
     n_instances = 100
     n_customers = 400
-    lp_dir = f'data/instances/facilities/eval_{n_customers}c'
+    lp_dir = f'data/instances/capfac/eval_{n_customers}c'
     os.makedirs(lp_dir)
     filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
     customers.extend([n_customers] * n_instances)
@@ -631,7 +634,7 @@ def generate_capfacs(rng: np.random.RandomState):
 
 
 def generate_capfac(n_customers, filepath, rng, n_facilities=100, ratio=5):
-    """Generates a capacitated facility problem instance and writes it to a CPLEX LP file.
+    """Generates a capacitated facility location problem instance and writes it to a CPLEX LP file.
 
     This method randomly generates costs, capacities, demands, based on the algorithm described in [1]_. For this
     purpose, we first randomly place facilities and customers on a 1x1 surface and multiply the Euclidian distance
@@ -680,32 +683,32 @@ def generate_capfac(n_customers, filepath, rng, n_facilities=100, ratio=5):
 
     # Write problem to CPLEX LP file.
     with open(filepath, 'w') as file:
-        file.write("minimize\nobj:")
+        file.write("MINIMIZE\n obj:")
         file.write("".join(
             [f" +{trans_costs[i, j]} x_{i + 1}_{j + 1}" for i in range(n_customers) for j in range(n_facilities)]))
         file.write("".join([f" +{fixed_costs[j]} y_{j + 1}" for j in range(n_facilities)]))
 
-        file.write("\n\nsubject to\n")
+        file.write("\n\nSUBJECT TO\n")
         for i in range(n_customers):
             file.write(
-                f"demand_{i + 1}:" + "".join([f" -1 x_{i + 1}_{j + 1}" for j in range(n_facilities)]) + f" <= -1\n")
+                f" demand_{i + 1}:" + "".join([f" -1 x_{i + 1}_{j + 1}" for j in range(n_facilities)]) + f" <= -1\n")
         for j in range(n_facilities):
-            file.write(f"capacity_{j + 1}:" + "".join([f" +{demand[i]} x_{i + 1}_{j + 1}" for i in
-                                                       range(n_customers)]) + f" -{capacities[j]} y_{j + 1} <= 0\n")
+            file.write(f" capacity_{j + 1}:" + "".join([f" +{demand[i]} x_{i + 1}_{j + 1}" for i in
+                                                        range(n_customers)]) + f" -{capacities[j]} y_{j + 1} <= 0\n")
 
         # Optional constraints for LP relaxation tightening.
-        file.write("total_capacity:" + "".join(
+        file.write(" total_capacity:" + "".join(
             [f" -{capacities[j]} y_{j + 1}" for j in range(n_facilities)]) + f" <= -{total_demand}\n")
         for i in range(n_customers):
             for j in range(n_facilities):
-                file.write(f"affectation_{i + 1}_{j + 1}: +1 x_{i + 1}_{j + 1} -1 y_{j + 1} <= 0")
+                file.write(f" affectation_{i + 1}_{j + 1}: +1 x_{i + 1}_{j + 1} -1 y_{j + 1} <= 0\n")
 
-        file.write("\nbounds\n")
+        file.write("\nBOUNDS\n")
         for i in range(n_customers):
             for j in range(n_facilities):
-                file.write(f"0 <= x_{i + 1}_{j + 1} <= 1\n")
+                file.write(f" 0 <= x_{i + 1}_{j + 1} <= 1\n")
 
-        file.write("\nbinary\n")
+        file.write("\nBINARY\n")
         file.write("".join([f" y_{j + 1}" for j in range(n_facilities)]))
 
 
@@ -819,8 +822,8 @@ def generate_indset(graph, filepath):
 
     # Write problem to CPLEX LP file.
     with open(filepath, 'w') as lp_file:
-        lp_file.write("maximize\nOBJ:" + "".join([f" + 1 x{node + 1}" for node in range(len(graph))]) + "\n")
-        lp_file.write("\nsubject to\n")
+        lp_file.write("MAXIMIZE\n obj:" + "".join([f" + 1 x{node + 1}" for node in range(len(graph))]) + "\n")
+        lp_file.write("\nSUBJECT TO\n")
         for count, group in enumerate(inequalities):
-            lp_file.write(f"C{count + 1}:" + "".join([f" + x{node + 1}" for node in sorted(group)]) + " <= 1\n")
-        lp_file.write("\nbinary\n" + " ".join([f"x{node + 1}" for node in range(len(graph))]) + "\n")
+            lp_file.write(f" c{count + 1}:" + "".join([f" + x{node + 1}" for node in sorted(group)]) + " <= 1\n")
+        lp_file.write("\nBINARY\n" + "".join([f" x{node + 1}" for node in range(len(graph))]) + "\n")
