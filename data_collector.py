@@ -32,31 +32,65 @@ import pickle
 import shutil
 
 import numpy as np
-from pyscipopt import Model, SCIP_LPSOLSTAT, SCIP_RESULT
+from pyscipopt import Model, SCIP_RESULT
 from pyscipopt.scip import Cutsel
 
 
 class SamplingAgent(Cutsel):
+    """Cut selector.
+
+        Sampling: add expert query probability, otherwise fall back to a static hybrid branching rule.
+        Deployment: do not use gap, just call the neural network.
+        """
+
+    def __init__(self, p_max, p_max_ub, skip_factor):
+        self.p_max = p_max
+        self.p_max_ub = p_max_ub
+        self.skip_factor = skip_factor
 
     def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
-        def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
-            closures = np.zeros((len(cuts)))
-            gap = self.model.getGap
-            for i in range(len(cuts)):
-                cut = cuts[i]
-                self.model.startDive()
-                self.model.addRowDiving(cut)
-                self.model.constructLP()
-                self.model.solveDiveLP()
+        closures = np.zeros(len(cuts))
+        gap = self.model.getGap
 
-                if self.model.getLPSolstat != SCIP_LPSOLSTAT.ITERLIMIT and self.model.getLPSolstat != \
-                        SCIP_LPSOLSTAT.TIMELIMIT:
-                    closures[i] = gap - self.model.getGap()
-                self.model.endDive()
-            rankings = sorted(range(len(cuts)), key=lambda x: closures[x], reverse=True)
-            sorted_cuts = [cuts[rank] for rank in rankings]
+        # For each candidate cut, determine the cap closure compared to the current integrality gap.
+        for i in range(len(cuts)):
+            cut = cuts[i]
+            self.model.startDive()
 
-            return {'cuts': sorted_cuts, 'nselectedcuts': min(maxnselectedcuts, len(cuts))}
+            # Add the cut to the LP relaxation and solve it.
+            self.model.addRowDiving(cut)
+            self.model.constructLP()
+            self.model.solveDiveLP()
+
+            # Compute the gap closure.
+            closures[i] = gap - self.model.getGap()
+            self.model.endDive()
+
+        # Rank the cuts in descending order of gap closure.
+        rankings = sorted(range(len(cuts)), key=lambda x: closures[x], reverse=True)
+        sorted_cuts = np.array([cuts[rank] for rank in rankings])
+
+        # Sort gap closures in descending order as well to match the array with sorted cuts.
+        closures = -np.sort(-closures)
+
+        # Remove cuts of low quality that are parallel to a cut of higher quality.
+        i = 0
+        while i < len(sorted_cuts) - 1:
+            # Mark all cuts that are parallel to higher-quality cut i.
+            parallelism = [self.model.getRowParallelism(sorted_cuts[i], sorted_cuts[j]) for j in
+                           range(i + 1, len(sorted_cuts))]
+            parallelism = np.pad(parallelism, (i + 1, 0), constant_values=0)
+            marked = parallelism > self.p_max
+
+            # Only remove low-quality or very parallel cuts.
+            low_quality = np.logical_or(closures < 0.9 * closures[0], parallelism > self.p_max_ub)
+            to_remove = np.logical_and(marked, low_quality)
+
+            # Delete cuts that are marked for removal.
+            sorted_cuts = np.delete(sorted_cuts, to_remove)
+            i += 1
+
+        return {'cuts': sorted_cuts, 'nselectedcuts': min(maxnselectedcuts, len(cuts)), 'result': SCIP_RESULT.SUCCESS}
 
 
 class SamplingAgent(scip.Branchrule):
