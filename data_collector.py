@@ -32,7 +32,7 @@ import pickle
 import shutil
 
 import numpy as np
-from pyscipopt import Model, SCIP_RESULT
+from pyscipopt import Model, SCIP_LPSOLSTAT, SCIP_RESULT
 from pyscipopt.scip import Cutsel
 
 
@@ -49,33 +49,63 @@ class SamplingAgent(Cutsel):
         self.skip_factor = skip_factor
 
     def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
-        closures = np.zeros(len(cuts))
-        gap = self.model.getGap
+        improvements = np.zeros(len(cuts))
+        bound = self.model.getLPObjVal()
 
-        # For each candidate cut, determine the cap closure compared to the current integrality gap.
+        # For each candidate cut, determine the bound improvement compared to the current LP solution.
         for i in range(len(cuts)):
             cut = cuts[i]
             self.model.startDive()
 
             # Add the cut to the LP relaxation and solve it.
-            self.model.addRowDiving(cut)
+            self.model.addRowDive(cut)
             self.model.constructLP()
             self.model.solveDiveLP()
 
-            # Compute the gap closure.
-            closures[i] = gap - self.model.getGap()
+            # Make sure that the LP bound is feasible.
+            cut_bound = 0
+            solstat = self.model.getLPSolstat()
+            if solstat != SCIP_LPSOLSTAT.ITERLIMIT and solstat != SCIP_LPSOLSTAT.TIMELIMIT:
+                cut_bound = self.model.getLPObjVal()
+
+            # Compute the bound improvement.
+            improvements[i] = abs(bound - cut_bound)
             self.model.endDive()
 
-        # Rank the cuts in descending order of gap closure.
-        rankings = sorted(range(len(cuts)), key=lambda x: closures[x], reverse=True)
+        # Rank the cuts in descending order of bound improvement.
+        rankings = sorted(range(len(cuts)), key=lambda x: improvements[x], reverse=True)
         sorted_cuts = np.array([cuts[rank] for rank in rankings])
 
-        # Sort gap closures in descending order as well to match the array with sorted cuts.
-        closures = -np.sort(-closures)
+        # Sort bound improvements in descending order as well to match the array with sorted cuts.
+        improvements = -np.sort(-improvements)
 
-        # Remove cuts of low quality that are parallel to a cut of higher quality.
+        # Other metrics.
+        directed_cutoff = [self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in sorted_cuts]
+        efficacy = [self.model.getCutEfficacy(cut) for cut in sorted_cuts]
+        integral_support = [self.model.getRowNumIntCols(cut) / cut.getNNonz() for cut in sorted_cuts]
+        objective_parallelism = [self.model.getRowObjParallelism(cut) for cut in sorted_cuts]
+
+        # First check whether any cuts are parallel to forced cuts.
+        n_selected = len(cuts)
+        for cut in forcedcuts:
+            # Mark all cuts that are parallel to forced cut i.
+            parallelism = [self.model.getRowParallelism(cut, sorted_cuts[j]) for j in range(n_selected)]
+            parallelism = np.pad(parallelism, (0, len(cuts) - n_selected), constant_values=0)
+            marked = parallelism > self.p_max
+
+            # Only remove low-quality or very parallel cuts.
+            low_quality = np.logical_or(improvements < 0.9 * improvements[0], parallelism > self.p_max_ub)
+            to_remove = np.logical_and(marked, low_quality)
+
+            # Move cuts that are marked for removal to the back and decrease number of selected cuts.
+            removed = sorted_cuts[to_remove]
+            sorted_cuts = np.delete(sorted_cuts, to_remove)
+            sorted_cuts = np.concatenate((sorted_cuts, removed))
+            n_selected -= removed.size
+
+        # Now remove cuts of low quality that are parallel to a cut of higher quality.
         i = 0
-        while i < len(sorted_cuts) - 1:
+        while i < n_selected - 1:
             # Mark all cuts that are parallel to higher-quality cut i.
             parallelism = [self.model.getRowParallelism(sorted_cuts[i], sorted_cuts[j]) for j in
                            range(i + 1, len(sorted_cuts))]
@@ -83,14 +113,17 @@ class SamplingAgent(Cutsel):
             marked = parallelism > self.p_max
 
             # Only remove low-quality or very parallel cuts.
-            low_quality = np.logical_or(closures < 0.9 * closures[0], parallelism > self.p_max_ub)
+            low_quality = np.logical_or(improvements < 0.9 * improvements[0], parallelism > self.p_max_ub)
             to_remove = np.logical_and(marked, low_quality)
 
-            # Delete cuts that are marked for removal.
+            # Move cuts that are marked for removal to the back and decrease number of selected cuts.
+            removed = sorted_cuts[to_remove]
             sorted_cuts = np.delete(sorted_cuts, to_remove)
+            sorted_cuts = np.concatenate((sorted_cuts, removed))
+            n_selected -= removed.size
             i += 1
 
-        return {'cuts': sorted_cuts, 'nselectedcuts': min(maxnselectedcuts, len(cuts)), 'result': SCIP_RESULT.SUCCESS}
+        return {'cuts': sorted_cuts, 'nselectedcuts': min(n_selected, maxnselectedcuts), 'result': SCIP_RESULT.SUCCESS}
 
 
 class SamplingAgent(scip.Branchrule):
