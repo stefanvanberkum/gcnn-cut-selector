@@ -52,7 +52,7 @@ class SamplingAgent(Cutsel):
         improvements = np.zeros(len(cuts))
         bound = self.model.getLPObjVal()
 
-        # For each candidate cut, determine the bound improvement compared to the current LP solution.
+        # For each candidate cut, determine the relative bound improvement compared to the current LP solution.
         for i in range(len(cuts)):
             cut = cuts[i]
             self.model.startDive()
@@ -68,15 +68,15 @@ class SamplingAgent(Cutsel):
             if solstat != SCIP_LPSOLSTAT.ITERLIMIT and solstat != SCIP_LPSOLSTAT.TIMELIMIT:
                 cut_bound = self.model.getLPObjVal()
 
-            # Compute the bound improvement.
-            improvements[i] = abs(bound - cut_bound)
+            # Compute the relative bound improvement.
+            improvements[i] = abs(bound - cut_bound) / abs(bound)
             self.model.endDive()
 
-        # Rank the cuts in descending order of bound improvement.
+        # Rank the cuts in descending order of relative bound improvement.
         rankings = sorted(range(len(cuts)), key=lambda x: improvements[x], reverse=True)
         sorted_cuts = np.array([cuts[rank] for rank in rankings])
 
-        # Sort bound improvements in descending order as well to match the array with sorted cuts.
+        # Sort relative bound improvements in descending order as well to match the array with sorted cuts.
         improvements = -np.sort(-improvements)
 
         # Other metrics.
