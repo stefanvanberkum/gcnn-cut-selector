@@ -28,6 +28,7 @@ import gzip
 import pickle
 
 import numpy as np
+import pyscipopt.scip
 import scipy.sparse as sp
 
 
@@ -57,49 +58,110 @@ def scip_init(model, seed):
     model.setIntParam('presolving/maxrestarts', 0)
 
 
-def get_state(model, cache=None):
+def get_state(model: pyscipopt.scip.Model, obj_norm=None):
     """Extracts the graph representation of the problem at the current solver state.
 
     The nodes in this graph are the constraints, variables, and cut candidates. Constraints and cuts are connected to
     a variable if and only if this variable appears in the row (cut or constraint).
 
     :param model: The current model.
-    :param cache: A cache to avoid recomputing features that stay constant during the solving process.
+    :param obj_norm: The norm of the objective function, provided after the initial calculation to avoid recomputing
+        it on every iteration.
     :return: A tuple consisting of the constraint, constraint edge, variable, cut, and cut edge features. The
-    constraint, variable, and cuts features are dictionaries of the form {'feature': str, 'values': np.ndarray}. The
-    edge features are of the form {'feature': str, 'indices': np.ndarray, 'values': np.ndarray}, where the indices
+        constraint, variable, and cuts features are dictionaries of the form {'feature': str, 'values': np.ndarray}. The
+        edge features are of the form {'feature': str, 'indices': np.ndarray, 'values': np.ndarray}, where the indices
     """
 
-    if cache is None or model.getNNodes() == 1:
-        cache = {}
-
-    if 'state' in cache:
-        obj_norm = cache['state']['obj_norm']
-    else:
+    if obj_norm is None:
         # Compute the norm of the objective value.
         obj_norm = np.linalg.norm(list(model.getObjective().terms.values()))
         obj_norm = 1 if obj_norm <= 0 else obj_norm
 
-    # Compute the norm of each row.
+    # Retrieve rows (constraints) and columns (variables).
     rows = model.getLPRowsData()
+    cols = model.getLPColsData()
+    n_rows = len(rows)
+    n_cols = len(cols)
+
+    # Compute the norm of each row.
     row_norms = np.array([row.getNorm() for row in rows])
     row_norms[row_norms == 0] = 1
 
-    # Column features
-    n_cols = len(s['col']['types'])
+    # Row (constraint) features.
+    row_feats = {}
 
-    if 'state' in buffer:
-        col_feats = buffer['state']['col_feats']
-    else:
-        col_feats = {}
-        col_feats['type'] = np.zeros((n_cols, 4))  # BINARY INTEGER IMPLINT CONTINUOUS
-        col_feats['type'][np.arange(n_cols), s['col']['types']] = 1
-        col_feats['coef_normalized'] = s['col']['coefs'].reshape(-1, 1) / obj_norm
+    # Split constraints of the form lhs <= d^T x <= rhs into two parts (lhs <= d^T x is transformed to -d^T x <= -lhs).
+    lhs = np.array([row.getLhs() for row in rows])
+    rhs = np.array([row.getRhs() for row in rows])
+    has_lhs = [not model.isInfinity(-val) for val in lhs]
+    has_rhs = [not model.isInfinity(val) for val in rhs]
+    rows = np.array(rows)
+    lhs_rows = rows[has_lhs]
+    rhs_rows = rows[has_rhs]
 
-    col_feats['has_lb'] = ~np.isnan(s['col']['lbs']).reshape(-1, 1)
-    col_feats['has_ub'] = ~np.isnan(s['col']['ubs']).reshape(-1, 1)
-    col_feats['sol_is_at_lb'] = s['col']['sol_is_at_lb'].reshape(-1, 1)
-    col_feats['sol_is_at_ub'] = s['col']['sol_is_at_ub'].reshape(-1, 1)
+    # Compute cosine similarity with the objective function.
+    cosines = np.array([get_objCosine(rows[i], row_norms[i], obj_norm) for i in range(n_rows)])
+    row_feats['obj_cosine'] = np.concatenate((-cosines[has_lhs], cosines[has_rhs])).reshape(-1, 1)
+
+    # Compute the right-hand side of each constraint.
+    row_feats['bias'] = np.concatenate((-(lhs / row_norms)[has_lhs], (rhs / row_norms)[has_rhs])).reshape(-1, 1)
+
+    # Compute tightness indicator.
+    row_feats['is_tight'] = np.concatenate(([row.getBasisStatus() == 'lower' for row in lhs_rows],
+                                            [row.getBasisStatus() == 'upper' for row in rhs_rows])).reshape(-1, 1)
+
+    duals = np.array([model.getRowDualSol(row) for row in rows]) / (row_norms * obj_norm)
+    row_feats['dual'] = np.concatenate((-duals[has_lhs], +duals[has_rhs])).reshape(-1, 1)
+
+    row_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
+                      row_feats.items()]
+    row_feat_names = [n for names in row_feat_names for n in names]
+    row_feat_vals = np.concatenate(list(row_feats.values()), axis=-1)
+    constraint_feats = {'names': row_feat_names, 'values': row_feat_vals}
+
+    # Constraint edge features.
+    # For each row, record a vector [value / row_norm, row_index, column_index] and stack everything into one big
+    # matrix (-1x3).
+    data = np.array([[rows[i].getVals()[j] / row_norms[i], rows[i].getLPPos(), rows[i].getCols()[j].getLPPos()] for i
+                     in range(n_rows) for j in range(len(rows[i].getCols()))])
+
+    # Put into sparse CSR matrix format, transform to COO format, and collect indices.
+    coef_matrix = sp.csr_matrix((data[:, 0], (data[:, 1], data[:, 2])), shape=(n_rows, n_cols))
+    coef_matrix = sp.vstack((-coef_matrix[has_lhs, :], coef_matrix[has_rhs, :])).tocoo(copy=False)
+    row_ind, col_ind = coef_matrix.row, coef_matrix.col
+    edge_feats = {'coef': coef_matrix.data.reshape(-1, 1)}
+
+    edge_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
+                       edge_feats.items()]
+    edge_feat_names = [n for names in edge_feat_names for n in names]
+    edge_feat_indices = np.vstack([row_ind, col_ind])
+    edge_feat_vals = np.concatenate(list(edge_feats.values()), axis=-1)
+    cons_edge_feats = {'names': edge_feat_names, 'indices': edge_feat_indices, 'values': edge_feat_vals}
+
+    # Column (variable) features.
+    col_feats = {}
+
+    # Retrieve column type.
+    type_map = {'BINARY': 0, 'INTEGER': 1, 'IMPLINT': 2, 'CONTINUOUS': 3}
+    types = np.array([type_map[col.getVar().vtype()] for col in cols])
+    col_feats['type'] = np.zeros((n_cols, 4))
+    col_feats['type'][np.arange(n_cols), types] = 1
+
+    # Compute normalized column coefficient in the objective function.
+    col_feats['obj_coef'] = np.array([col.getObjCoeff() for col in cols]) / obj_norm
+
+    # Get variable lower and upper bounds.
+    lb = np.array([col.getLb() for col in cols])
+    ub = np.array([col.getUb() for col in cols])
+    has_lb = [not model.isInfinity(-val) for val in lb]
+    has_ub = [not model.isInfinity(val) for val in ub]
+    col_feats['has_lb'] = np.array(has_lb).astype(int)
+    col_feats['has_ub'] = np.array(has_ub).astype(int)
+    row_feats['is_tight'] = np.concatenate((,
+                                            [row.getBasisStatus() == 'upper' for row in rhs_rows])).reshape(-1, 1)
+    col_feats['at_lb'] = [col.getBasisStatus() == 'lower' for col in cols[col_feat]]
+    col_feats['at_ub'] = s['col']['sol_is_at_ub'].reshape(-1, 1)
+
     col_feats['sol_frac'] = s['col']['solfracs'].reshape(-1, 1)
     col_feats['sol_frac'][s['col']['types'] == 3] = 0  # continuous have no fractionality
     col_feats['basis_status'] = np.zeros((n_cols, 4))  # LOWER BASIC UPPER ZERO
@@ -115,76 +177,7 @@ def get_state(model, cache=None):
     col_feat_names = [n for names in col_feat_names for n in names]
     col_feat_vals = np.concatenate(list(col_feats.values()), axis=-1)
 
-    variable_features = {'names': col_feat_names, 'values': col_feat_vals, }
-
-    # Row features
-
-    if 'state' in buffer:
-        row_feats = buffer['state']['row_feats']
-        has_lhs = buffer['state']['has_lhs']
-        has_rhs = buffer['state']['has_rhs']
-    else:
-        row_feats = {}
-        has_lhs = np.nonzero(~np.isnan(s['row']['lhss']))[0]
-        has_rhs = np.nonzero(~np.isnan(s['row']['rhss']))[0]
-        row_feats['obj_cosine_similarity'] = np.concatenate(
-            (-s['row']['objcossims'][has_lhs], +s['row']['objcossims'][has_rhs])).reshape(-1, 1)
-        row_feats['bias'] = np.concatenate(
-            (-(s['row']['lhss'] / row_norms)[has_lhs], +(s['row']['rhss'] / row_norms)[has_rhs])).reshape(-1, 1)
-
-    row_feats['is_tight'] = np.concatenate((s['row']['is_at_lhs'][has_lhs], s['row']['is_at_rhs'][has_rhs])).reshape(-1,
-                                                                                                                     1)
-
-    row_feats['age'] = np.concatenate((s['row']['ages'][has_lhs], s['row']['ages'][has_rhs])).reshape(-1, 1) / (
-            s['stats']['nlps'] + 5)
-
-    # # redundant with is_tight
-    # tmp = s['row']['basestats']  # LOWER BASIC UPPER ZERO
-    # tmp[s['row']['lhss'] == s['row']['rhss']] = 4  # LOWER == UPPER for equality constraints
-    # tmp_l = tmp[has_lhs]
-    # tmp_l[tmp_l == 2] = 1  # LHS UPPER -> BASIC
-    # tmp_l[tmp_l == 4] = 2  # EQU UPPER -> UPPER
-    # tmp_l[tmp_l == 0] = 2  # LHS LOWER -> UPPER
-    # tmp_r = tmp[has_rhs]
-    # tmp_r[tmp_r == 0] = 1  # RHS LOWER -> BASIC
-    # tmp_r[tmp_r == 4] = 2  # EQU LOWER -> UPPER
-    # tmp = np.concatenate((tmp_l, tmp_r)) - 1  # BASIC UPPER ZERO
-    # row_feats['basis_status'] = np.zeros((len(has_lhs) + len(has_rhs), 3))
-    # row_feats['basis_status'][np.arange(len(has_lhs) + len(has_rhs)), tmp] = 1
-
-    tmp = s['row']['dualsols'] / (row_norms * obj_norm)
-    row_feats['dualsol_val_normalized'] = np.concatenate((-tmp[has_lhs], +tmp[has_rhs])).reshape(-1, 1)
-
-    row_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
-                      row_feats.items()]
-    row_feat_names = [n for names in row_feat_names for n in names]
-    row_feat_vals = np.concatenate(list(row_feats.values()), axis=-1)
-
-    constraint_features = {'names': row_feat_names, 'values': row_feat_vals, }
-
-    # Edge features
-    if 'state' in buffer:
-        edge_row_idxs = buffer['state']['edge_row_idxs']
-        edge_col_idxs = buffer['state']['edge_col_idxs']
-        edge_feats = buffer['state']['edge_feats']
-    else:
-        coef_matrix = sp.csr_matrix((s['nzrcoef']['vals'] / row_norms[s['nzrcoef']['rowidxs']],
-                                     (s['nzrcoef']['rowidxs'], s['nzrcoef']['colidxs'])),
-                                    shape=(len(s['row']['nnzrs']), len(s['col']['types'])))
-        coef_matrix = sp.vstack((-coef_matrix[has_lhs, :], coef_matrix[has_rhs, :])).tocoo(copy=False)
-
-        edge_row_idxs, edge_col_idxs = coef_matrix.row, coef_matrix.col
-        edge_feats = {}
-
-        edge_feats['coef_normalized'] = coef_matrix.data.reshape(-1, 1)
-
-    edge_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
-                       edge_feats.items()]
-    edge_feat_names = [n for names in edge_feat_names for n in names]
-    edge_feat_indices = np.vstack([edge_row_idxs, edge_col_idxs])
-    edge_feat_vals = np.concatenate(list(edge_feats.values()), axis=-1)
-
-    edge_features = {'names': edge_feat_names, 'indices': edge_feat_indices, 'values': edge_feat_vals, }
+    var_feats = {'names': col_feat_names, 'values': col_feat_vals, }
 
     if 'state' not in buffer:
         buffer['state'] = {'obj_norm': obj_norm, 'col_feats': col_feats, 'row_feats': row_feats, 'has_lhs': has_lhs,
@@ -192,6 +185,24 @@ def get_state(model, cache=None):
                            'edge_feats': edge_feats, }
 
     return constraint_features, edge_features, variable_features
+
+
+def get_objCosine(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
+    """Computes the cosine similarity between a row and the objective function.
+
+    :param row: The row.
+    :param row_norm: The norm of the row.
+    :param obj_norm: The norm of the objective function.
+    :return: The cosine similarity.
+    """
+
+    cols = row.getCols()
+    vals = row.getVals()
+    dot = np.sum([vals[i] * cols[i].getObjCoeff() for i in range(len(cols))])
+    return dot / (row_norm * obj_norm)
+
+
+def getEdgeData()
 
 
 def extract_state(model, buffer=None):
