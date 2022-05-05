@@ -633,7 +633,7 @@ def generate_capfacs(rng: np.random.RandomState):
         generate_capfac(n_customers, filepath, rng)
 
 
-def generate_capfac(n_customers, filepath, rng, n_facilities=100, ratio=5):
+def generate_capfac(n_customers: int, filepath: str, rng: np.random.RandomState, n_facilities=100, ratio=5):
     """Generates a capacitated facility location problem instance and writes it to a CPLEX LP file.
 
     This method randomly generates costs, capacities, demands, based on the algorithm described in [1]_. For this
@@ -779,7 +779,7 @@ def generate_indsets(rng: np.random.RandomState):
         generate_indset(graph, filepath)
 
 
-def generate_indset(graph, filepath):
+def generate_indset(graph: Graph, filepath: str):
     """Generates a maximum independent set problem instance and writes it to a CPLEX LP file.
 
     This method generates the maximum independent set problem using a previously generated graph, based on the

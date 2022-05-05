@@ -26,6 +26,7 @@ References
 import datetime
 import gzip
 import pickle
+from math import floor
 
 import numpy as np
 import pyscipopt.scip
@@ -68,8 +69,9 @@ def get_state(model: pyscipopt.scip.Model, obj_norm=None):
     :param obj_norm: The norm of the objective function, provided after the initial calculation to avoid recomputing
         it on every iteration.
     :return: A tuple consisting of the constraint, constraint edge, variable, cut, and cut edge features. The
-        constraint, variable, and cuts features are dictionaries of the form {'feature': str, 'values': np.ndarray}. The
-        edge features are of the form {'feature': str, 'indices': np.ndarray, 'values': np.ndarray}, where the indices
+        constraint, variable, and cut features are dictionaries of the form {'features': list[str], 'values':
+        np.ndarray}. The edge features are of the form {'features': list[str], 'indices': np.ndarray, 'values':
+        np.ndarray}, where the values are provided in COO sparse matrix format.
     """
 
     if obj_norm is None:
@@ -99,17 +101,18 @@ def get_state(model: pyscipopt.scip.Model, obj_norm=None):
     lhs_rows = rows[has_lhs]
     rhs_rows = rows[has_rhs]
 
-    # Compute cosine similarity with the objective function.
-    cosines = np.array([get_objCosine(rows[i], row_norms[i], obj_norm) for i in range(n_rows)])
-    row_feats['obj_cosine'] = np.concatenate((-cosines[has_lhs], cosines[has_rhs])).reshape(-1, 1)
-
     # Compute the right-hand side of each constraint.
-    row_feats['bias'] = np.concatenate((-(lhs / row_norms)[has_lhs], (rhs / row_norms)[has_rhs])).reshape(-1, 1)
+    row_feats['rhs'] = np.concatenate((-(lhs / row_norms)[has_lhs], (rhs / row_norms)[has_rhs])).reshape(-1, 1)
 
     # Compute tightness indicator.
     row_feats['is_tight'] = np.concatenate(([row.getBasisStatus() == 'lower' for row in lhs_rows],
                                             [row.getBasisStatus() == 'upper' for row in rhs_rows])).reshape(-1, 1)
 
+    # Compute cosine similarity with the objective function.
+    cosines = np.array([get_objCosine(rows[i], row_norms[i], obj_norm) for i in range(n_rows)])
+    row_feats['obj_cosine'] = np.concatenate((-cosines[has_lhs], cosines[has_rhs])).reshape(-1, 1)
+
+    # Compute the dual solution value, normalized by the product of the row and objective norm.
     duals = np.array([model.getRowDualSol(row) for row in rows]) / (row_norms * obj_norm)
     row_feats['dual'] = np.concatenate((-duals[has_lhs], +duals[has_rhs])).reshape(-1, 1)
 
@@ -117,13 +120,13 @@ def get_state(model: pyscipopt.scip.Model, obj_norm=None):
                       row_feats.items()]
     row_feat_names = [n for names in row_feat_names for n in names]
     row_feat_vals = np.concatenate(list(row_feats.values()), axis=-1)
-    constraint_feats = {'names': row_feat_names, 'values': row_feat_vals}
+    row_feats = {'features': row_feat_names, 'values': row_feat_vals}
 
     # Constraint edge features.
     # For each row, record a vector [value / row_norm, row_index, column_index] and stack everything into one big
     # matrix (-1x3).
-    data = np.array([[rows[i].getVals()[j] / row_norms[i], rows[i].getLPPos(), rows[i].getCols()[j].getLPPos()] for i
-                     in range(n_rows) for j in range(len(rows[i].getCols()))])
+    data = np.array([[rows[i].getVals()[j] / row_norms[i], rows[i].getLPPos(), rows[i].getCols()[j].getLPPos()] for i in
+                     range(n_rows) for j in range(len(rows[i].getCols()))])
 
     # Put into sparse CSR matrix format, transform to COO format, and collect indices.
     coef_matrix = sp.csr_matrix((data[:, 0], (data[:, 1], data[:, 2])), shape=(n_rows, n_cols))
@@ -136,7 +139,7 @@ def get_state(model: pyscipopt.scip.Model, obj_norm=None):
     edge_feat_names = [n for names in edge_feat_names for n in names]
     edge_feat_indices = np.vstack([row_ind, col_ind])
     edge_feat_vals = np.concatenate(list(edge_feats.values()), axis=-1)
-    cons_edge_feats = {'names': edge_feat_names, 'indices': edge_feat_indices, 'values': edge_feat_vals}
+    row_edge_feats = {'features': edge_feat_names, 'indices': edge_feat_indices, 'values': edge_feat_vals}
 
     # Column (variable) features.
     col_feats = {}
@@ -148,43 +151,84 @@ def get_state(model: pyscipopt.scip.Model, obj_norm=None):
     col_feats['type'][np.arange(n_cols), types] = 1
 
     # Compute normalized column coefficient in the objective function.
-    col_feats['obj_coef'] = np.array([col.getObjCoeff() for col in cols]) / obj_norm
+    col_feats['obj_coef'] = np.array([col.getObjCoeff() for col in cols]).reshape(-1, 1) / obj_norm
 
-    # Get variable lower and upper bounds.
+    # Get variable lower and upper bounds, and whether the variable is at these bounds.
     lb = np.array([col.getLb() for col in cols])
     ub = np.array([col.getUb() for col in cols])
     has_lb = [not model.isInfinity(-val) for val in lb]
     has_ub = [not model.isInfinity(val) for val in ub]
-    col_feats['has_lb'] = np.array(has_lb).astype(int)
-    col_feats['has_ub'] = np.array(has_ub).astype(int)
-    row_feats['is_tight'] = np.concatenate((,
-                                            [row.getBasisStatus() == 'upper' for row in rhs_rows])).reshape(-1, 1)
-    col_feats['at_lb'] = [col.getBasisStatus() == 'lower' for col in cols[col_feat]]
-    col_feats['at_ub'] = s['col']['sol_is_at_ub'].reshape(-1, 1)
+    col_feats['has_lb'] = np.array(has_lb).astype(int).reshape(-1, 1)
+    col_feats['has_ub'] = np.array(has_ub).astype(int).reshape(-1, 1)
+    col_feats['at_lb'] = np.array([col.getBasisStatus() == 'lower' for col in cols]).reshape(-1, 1)
+    col_feats['at_ub'] = np.array([col.getBasisStatus() == 'upper' for col in cols]).reshape(-1, 1)
 
-    col_feats['sol_frac'] = s['col']['solfracs'].reshape(-1, 1)
-    col_feats['sol_frac'][s['col']['types'] == 3] = 0  # continuous have no fractionality
-    col_feats['basis_status'] = np.zeros((n_cols, 4))  # LOWER BASIC UPPER ZERO
-    col_feats['basis_status'][np.arange(n_cols), s['col']['basestats']] = 1
-    col_feats['reduced_cost'] = s['col']['redcosts'].reshape(-1, 1) / obj_norm
-    col_feats['age'] = s['col']['ages'].reshape(-1, 1) / (s['stats']['nlps'] + 5)
-    col_feats['sol_val'] = s['col']['solvals'].reshape(-1, 1)
-    col_feats['inc_val'] = s['col']['incvals'].reshape(-1, 1)
-    col_feats['avg_inc_val'] = s['col']['avgincvals'].reshape(-1, 1)
+    # Get variable fractionality in the current LP solution.
+    col_feats['frac'] = np.array(
+        [0.5 - abs(col.getVar().getLPSol() - floor(col.getVar().getLPSol()) - 0.5) for col in cols]).reshape(-1, 1)
+    col_feats['frac'][types == 3] = 0  # Continuous variables have no fractionality.
+
+    # Compute the normalized reduced cost.
+    col_feats['reduced_cost'] = np.array([model.getVarRedcost(col.getVar()) for col in cols]).reshape(-1, 1) / obj_norm
+
+    # Get the variable's value in the current LP solution.
+    col_feats['lp_val'] = np.array([col.getVar().getLPSol() for col in cols]).reshape(-1, 1)
+
+    # Get the variable's value in the current primal solution.
+    col_feats['primal_val'] = np.array([col.getPrimsol() for col in cols]).reshape(-1, 1)
+
+    # Compute the variable's average value over all primal solutions.
+    col_feats['avg_primal'] = np.mean([[model.getSolVal(sol, col.getVar()) for sol in model.getSols()] for col in cols],
+                                      axis=1).reshape(-1, 1)
 
     col_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
                       col_feats.items()]
     col_feat_names = [n for names in col_feat_names for n in names]
     col_feat_vals = np.concatenate(list(col_feats.values()), axis=-1)
 
-    var_feats = {'names': col_feat_names, 'values': col_feat_vals, }
+    col_feats = {'features': col_feat_names, 'values': col_feat_vals}
 
-    if 'state' not in buffer:
-        buffer['state'] = {'obj_norm': obj_norm, 'col_feats': col_feats, 'row_feats': row_feats, 'has_lhs': has_lhs,
-                           'has_rhs': has_rhs, 'edge_row_idxs': edge_row_idxs, 'edge_col_idxs': edge_col_idxs,
-                           'edge_feats': edge_feats, }
+    # Cut candidate features.
+    cut_feats = {}
 
-    return constraint_features, edge_features, variable_features
+    # Rhs (normalized)
+
+    # Support
+
+    # Integral support (model.getRowNumIntCols())
+
+    # Efficacy
+
+    # Cutoff distance
+
+    # Objective parallelism.
+
+    cut_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
+                      cut_feats.items()]
+    cut_feat_names = [n for names in cut_feat_names for n in names]
+    cut_feat_vals = np.concatenate(list(cut_feats.values()), axis=-1)
+    cut_feats = {'features': cut_feat_names, 'values': cut_feat_vals}
+
+    # Constraint edge features.
+    # For each row, record a vector [value / row_norm, row_index, column_index] and stack everything into one big
+    # matrix (-1x3).
+    data = np.array([[rows[i].getVals()[j] / row_norms[i], rows[i].getLPPos(), rows[i].getCols()[j].getLPPos()] for i in
+                     range(n_rows) for j in range(len(rows[i].getCols()))])
+
+    # Put into sparse CSR matrix format, transform to COO format, and collect indices.
+    coef_matrix = sp.csr_matrix((data[:, 0], (data[:, 1], data[:, 2])), shape=(n_rows, n_cols))
+    coef_matrix = sp.vstack((-coef_matrix[has_lhs, :], coef_matrix[has_rhs, :])).tocoo(copy=False)
+    row_ind, col_ind = coef_matrix.row, coef_matrix.col
+    edge_feats = {'coef': coef_matrix.data.reshape(-1, 1)}
+
+    edge_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
+                       edge_feats.items()]
+    edge_feat_names = [n for names in edge_feat_names for n in names]
+    edge_feat_indices = np.vstack([row_ind, col_ind])
+    edge_feat_vals = np.concatenate(list(edge_feats.values()), axis=-1)
+    cut_edge_feats = {'features': edge_feat_names, 'indices': edge_feat_indices, 'values': edge_feat_vals}
+
+    return row_feats, row_edge_feats, col_feats, cut_feats, cut_edge_feats
 
 
 def get_objCosine(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
@@ -200,9 +244,6 @@ def get_objCosine(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
     vals = row.getVals()
     dot = np.sum([vals[i] * cols[i].getObjCoeff() for i in range(len(cols))])
     return dot / (row_norm * obj_norm)
-
-
-def getEdgeData()
 
 
 def extract_state(model, buffer=None):
