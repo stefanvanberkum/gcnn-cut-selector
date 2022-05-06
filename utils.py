@@ -59,13 +59,14 @@ def scip_init(model, seed):
     model.setIntParam('presolving/maxrestarts', 0)
 
 
-def get_state(model: pyscipopt.scip.Model, obj_norm=None):
+def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row], obj_norm=None):
     """Extracts the graph representation of the problem at the current solver state.
 
     The nodes in this graph are the constraints, variables, and cut candidates. Constraints and cuts are connected to
     a variable if and only if this variable appears in the row (cut or constraint).
 
     :param model: The current model.
+    :param cuts: The current list of cut candidates.
     :param obj_norm: The norm of the objective function, provided after the initial calculation to avoid recomputing
         it on every iteration.
     :return: A tuple consisting of the constraint, constraint edge, variable, cut, and cut edge features. The
@@ -85,12 +86,12 @@ def get_state(model: pyscipopt.scip.Model, obj_norm=None):
     n_rows = len(rows)
     n_cols = len(cols)
 
-    # Compute the norm of each row.
-    row_norms = np.array([row.getNorm() for row in rows])
-    row_norms[row_norms == 0] = 1
-
     # Row (constraint) features.
     row_feats = {}
+
+    # Compute the norm of each constraint.
+    row_norms = np.array([row.getNorm() for row in rows])
+    row_norms[row_norms == 0] = 1
 
     # Split constraints of the form lhs <= d^T x <= rhs into two parts (lhs <= d^T x is transformed to -d^T x <= -lhs).
     lhs = np.array([row.getLhs() for row in rows])
@@ -98,15 +99,13 @@ def get_state(model: pyscipopt.scip.Model, obj_norm=None):
     has_lhs = [not model.isInfinity(-val) for val in lhs]
     has_rhs = [not model.isInfinity(val) for val in rhs]
     rows = np.array(rows)
-    lhs_rows = rows[has_lhs]
-    rhs_rows = rows[has_rhs]
 
-    # Compute the right-hand side of each constraint.
+    # Compute the right-hand side of each constraint, normalized by the row norm.
     row_feats['rhs'] = np.concatenate((-(lhs / row_norms)[has_lhs], (rhs / row_norms)[has_rhs])).reshape(-1, 1)
 
     # Compute tightness indicator.
-    row_feats['is_tight'] = np.concatenate(([row.getBasisStatus() == 'lower' for row in lhs_rows],
-                                            [row.getBasisStatus() == 'upper' for row in rhs_rows])).reshape(-1, 1)
+    row_feats['is_tight'] = np.concatenate(([row.getBasisStatus() == 'lower' for row in rows[has_lhs]],
+                                            [row.getBasisStatus() == 'upper' for row in rows[has_rhs]])).reshape(-1, 1)
 
     # Compute cosine similarity with the objective function.
     cosines = np.array([get_objCosine(rows[i], row_norms[i], obj_norm) for i in range(n_rows)])
@@ -191,17 +190,36 @@ def get_state(model: pyscipopt.scip.Model, obj_norm=None):
     # Cut candidate features.
     cut_feats = {}
 
-    # Rhs (normalized)
+    # Compute the norm of each cut candidate.
+    cut_norms = np.array([cut.getNorm() for cut in cuts])
+    cut_norms[cut_norms == 0] = 1
 
-    # Support
+    # Retrieve the right-hand side of the cut (cuts of the form lhs <= d^T x are transformed to -d^T x <= -lhs).
+    lhs = np.array([cut.getLhs() for cut in cuts])
+    rhs = np.array([cut.getRhs() for cut in cuts])
+    has_rhs = [not model.isInfinity(val) for val in rhs]
+    cuts = np.array(cuts)
+    lhs_cuts = cuts[has_lhs]
+    rhs_cuts = cuts[has_rhs]
 
-    # Integral support (model.getRowNumIntCols())
+    # Compute the right-hand side of each cut candidate, normalized by the cut norm.
+    cut_feats['rhs'] = np.concatenate((-(lhs / cut_norms)[has_lhs], (rhs / cut_norms)[has_rhs])).reshape(-1, 1)
+
+    # Compute the cut's support.
+    support = np.array([cut.getNNonz() for cut in cuts]) / model.getNVars()
+    cut_feats['support'] = np.concatenate(support[has_lhs], support[has_rhs]).reshape(-1, 1)
+
+    # Compute the cut's integral support.
+    cut_feats['int_support'] = np.concatenate().reshape(-1, 1)
 
     # Efficacy
+    cut_feats['int_support'] = np.concatenate().reshape(-1, 1)
 
     # Cutoff distance
+    cut_feats['int_support'] = np.concatenate().reshape(-1, 1)
 
     # Objective parallelism.
+    cut_feats['int_support'] = np.concatenate().reshape(-1, 1)
 
     cut_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
                       cut_feats.items()]
