@@ -31,6 +31,7 @@ from math import floor
 import numpy as np
 import pyscipopt.scip
 import scipy.sparse as sp
+import tensorflow as tf
 
 
 def log(str, logfile=None):
@@ -41,25 +42,7 @@ def log(str, logfile=None):
             print(str, file=f)
 
 
-def scip_init(model, seed):
-    """Initializes the SCIP model parameters.
-
-    :param model: The SCIP model to be initialized.
-    :param seed: The desired seed value to be used for variable permutation and other random components of the solver.
-    """
-
-    seed = seed % 2147483648  # SCIP seed range.
-
-    # Set up randomization.
-    model.setBoolParam('randomization/permutevars', True)
-    model.setIntParam('randomization/permutationseed', seed)
-    model.setIntParam('randomization/randomseedshift', seed)
-
-    # Disable presolver restarts.
-    model.setIntParam('presolving/maxrestarts', 0)
-
-
-def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row], obj_norm=None):
+def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     """Extracts the graph representation of the problem at the current solver state.
 
     The nodes in this graph are the constraints, variables, and cut candidates. Constraints and cuts are connected to
@@ -67,24 +50,22 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row], obj_n
 
     :param model: The current model.
     :param cuts: The current list of cut candidates.
-    :param obj_norm: The norm of the objective function, provided after the initial calculation to avoid recomputing
-        it on every iteration.
     :return: A tuple consisting of the constraint, constraint edge, variable, cut, and cut edge features. The
         constraint, variable, and cut features are dictionaries of the form {'features': list[str], 'values':
         np.ndarray}. The edge features are of the form {'features': list[str], 'indices': np.ndarray, 'values':
         np.ndarray}, where the values are provided in COO sparse matrix format.
     """
 
-    if obj_norm is None:
-        # Compute the norm of the objective value.
-        obj_norm = np.linalg.norm(list(model.getObjective().terms.values()))
-        obj_norm = 1 if obj_norm <= 0 else obj_norm
+    # Compute the norm of the objective value.
+    obj_norm = np.linalg.norm(list(model.getObjective().terms.values()))
+    obj_norm = 1 if obj_norm <= 0 else obj_norm
 
     # Retrieve rows (constraints) and columns (variables).
     rows = model.getLPRowsData()
     cols = model.getLPColsData()
     n_rows = len(rows)
     n_cols = len(cols)
+    n_cuts = len(cuts)
 
     # Row (constraint) features.
     row_feats = {}
@@ -195,31 +176,36 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row], obj_n
     cut_norms[cut_norms == 0] = 1
 
     # Retrieve the right-hand side of the cut (cuts of the form lhs <= d^T x are transformed to -d^T x <= -lhs).
+    # If the cut is of the form lhs <= d^T x <= rhs, we take the most binding side.
+    activity = np.array([model.getRowActivity(cut) for cut in cuts])
     lhs = np.array([cut.getLhs() for cut in cuts])
     rhs = np.array([cut.getRhs() for cut in cuts])
-    has_rhs = [not model.isInfinity(val) for val in rhs]
-    cuts = np.array(cuts)
-    lhs_cuts = cuts[has_lhs]
-    rhs_cuts = cuts[has_rhs]
+    has_lhs = (activity - lhs) < (rhs - activity)
+    has_rhs = np.logical_not(has_lhs)
 
     # Compute the right-hand side of each cut candidate, normalized by the cut norm.
     cut_feats['rhs'] = np.concatenate((-(lhs / cut_norms)[has_lhs], (rhs / cut_norms)[has_rhs])).reshape(-1, 1)
 
-    # Compute the cut's support.
+    # Compute each cut's support.
     support = np.array([cut.getNNonz() for cut in cuts]) / model.getNVars()
     cut_feats['support'] = np.concatenate(support[has_lhs], support[has_rhs]).reshape(-1, 1)
 
-    # Compute the cut's integral support.
-    cut_feats['int_support'] = np.concatenate().reshape(-1, 1)
+    # Compute each cut's integral support.
+    n_int = np.array([model.getRowNumIntCols(cut) for cut in cuts])
+    int_support = n_int / support
+    cut_feats['int_support'] = np.concatenate(int_support[has_lhs], int_support[has_rhs]).reshape(-1, 1)
 
-    # Efficacy
-    cut_feats['int_support'] = np.concatenate().reshape(-1, 1)
+    # Compute each cut's efficacy.
+    efficacy = np.array([model.getCutEfficacy(cut) for cut in cuts])
+    cut_feats['efficacy'] = np.concatenate(efficacy[has_lhs], efficacy[has_rhs]).reshape(-1, 1)
 
-    # Cutoff distance
-    cut_feats['int_support'] = np.concatenate().reshape(-1, 1)
+    # Compute each cut's directed cutoff distance.
+    cutoff = np.array([model.getCutLPSolCutoffDistance(cut, model.getBestSol()) for cut in cuts])
+    cut_feats['cutoff'] = np.concatenate(cutoff[has_lhs], cutoff[has_rhs]).reshape(-1, 1)
 
-    # Objective parallelism.
-    cut_feats['int_support'] = np.concatenate().reshape(-1, 1)
+    # Compute each cut's objective parallelism.
+    parallelism = np.array([model.getRowObjParallelism(cut) for cut in cuts])
+    cut_feats['parallelism'] = np.concatenate(parallelism[has_lhs], parallelism[has_rhs]).reshape(-1, 1)
 
     cut_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
                       cut_feats.items()]
@@ -227,22 +213,23 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row], obj_n
     cut_feat_vals = np.concatenate(list(cut_feats.values()), axis=-1)
     cut_feats = {'features': cut_feat_names, 'values': cut_feat_vals}
 
-    # Constraint edge features.
-    # For each row, record a vector [value / row_norm, row_index, column_index] and stack everything into one big
+    # Cut edge features.
+    # For each cut, record a vector [value / cut_norm, cut_index, column_index] and stack everything into one big
     # matrix (-1x3).
-    data = np.array([[rows[i].getVals()[j] / row_norms[i], rows[i].getLPPos(), rows[i].getCols()[j].getLPPos()] for i in
-                     range(n_rows) for j in range(len(rows[i].getCols()))])
+    data = np.array(
+        [[cuts[i].getVals()[j] / cut_norms[i], i, cuts[i].getCols()[j].getLPPos()] for i in range(n_cuts) for j in
+         range(len(cuts[i].getCols()))])
 
     # Put into sparse CSR matrix format, transform to COO format, and collect indices.
-    coef_matrix = sp.csr_matrix((data[:, 0], (data[:, 1], data[:, 2])), shape=(n_rows, n_cols))
+    coef_matrix = sp.csr_matrix((data[:, 0], (data[:, 1], data[:, 2])), shape=(n_cuts, n_cols))
     coef_matrix = sp.vstack((-coef_matrix[has_lhs, :], coef_matrix[has_rhs, :])).tocoo(copy=False)
-    row_ind, col_ind = coef_matrix.row, coef_matrix.col
+    cut_ind, col_ind = coef_matrix.row, coef_matrix.col
     edge_feats = {'coef': coef_matrix.data.reshape(-1, 1)}
 
     edge_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
                        edge_feats.items()]
     edge_feat_names = [n for names in edge_feat_names for n in names]
-    edge_feat_indices = np.vstack([row_ind, col_ind])
+    edge_feat_indices = np.vstack([cut_ind, col_ind])
     edge_feat_vals = np.concatenate(list(edge_feats.values()), axis=-1)
     cut_edge_feats = {'features': edge_feat_names, 'indices': edge_feat_indices, 'values': edge_feat_vals}
 
@@ -264,153 +251,32 @@ def get_objCosine(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
     return dot / (row_norm * obj_norm)
 
 
-def extract_state(model, buffer=None):
+def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_clock=False):
+    """Initializes the SCIP model parameters.
+
+    :param model: The SCIP model to be initialized.
+    :param seed: The desired seed value to be used for variable permutation and other random components of the solver.
+    :param cpu_clock: True if CPU time should be used for timing, otherwise wall clock time will be used.
     """
-    Compute a bipartite graph representation of the solver. In this
-    representation, the variables and constraints of the MILP are the
-    left- and right-hand side nodes, and an edge links two nodes iff the
-    variable is involved in the constraint. Both the nodes and edges carry
-    features.
-    Parameters
-    ----------
-    model : pyscipopt.scip.Model
-        The current model.
-    buffer : dict
-        A buffer to avoid re-extracting redundant information from the solver
-        each time.
-    Returns
-    -------
-    variable_features : dictionary of type {'names': list, 'values': np.ndarray}
-        The features associated with the variable nodes in the bipartite graph.
-    edge_features : dictionary of type ('names': list, 'indices': np.ndarray, 'values': np.ndarray}
-        The features associated with the edges in the bipartite graph.
-        This is given as a sparse matrix in COO format.
-    constraint_features : dictionary of type {'names': list, 'values': np.ndarray}
-        The features associated with the constraint nodes in the bipartite graph.
-    """
-    if buffer is None or model.getNNodes() == 1:
-        buffer = {}
 
-    # update state from buffer if any
-    s = model.getState(buffer['scip_state'] if 'scip_state' in buffer else None)
-    buffer['scip_state'] = s
+    # Trim seeds that exceed SCIP's maximum seed value.
+    seed = seed % 2147483648
 
-    if 'state' in buffer:
-        obj_norm = buffer['state']['obj_norm']
-    else:
-        obj_norm = np.linalg.norm(s['col']['coefs'])
-        obj_norm = 1 if obj_norm <= 0 else obj_norm
+    # Set up randomization.
+    model.setBoolParam('randomization/permutevars', True)
+    model.setIntParam('randomization/permutationseed', seed)
+    model.setIntParam('randomization/randomseedshift', seed)
 
-    row_norms = s['row']['norms']
-    row_norms[row_norms == 0] = 1
+    # Disable presolver restarts.
+    model.setIntParam('presolving/maxrestarts', 0)
 
-    # Column features
-    n_cols = len(s['col']['types'])
+    # Disable output.
+    model.setIntParam('display/verblevel', 0)
 
-    if 'state' in buffer:
-        col_feats = buffer['state']['col_feats']
-    else:
-        col_feats = {}
-        col_feats['type'] = np.zeros((n_cols, 4))  # BINARY INTEGER IMPLINT CONTINUOUS
-        col_feats['type'][np.arange(n_cols), s['col']['types']] = 1
-        col_feats['coef_normalized'] = s['col']['coefs'].reshape(-1, 1) / obj_norm
-
-    col_feats['has_lb'] = ~np.isnan(s['col']['lbs']).reshape(-1, 1)
-    col_feats['has_ub'] = ~np.isnan(s['col']['ubs']).reshape(-1, 1)
-    col_feats['sol_is_at_lb'] = s['col']['sol_is_at_lb'].reshape(-1, 1)
-    col_feats['sol_is_at_ub'] = s['col']['sol_is_at_ub'].reshape(-1, 1)
-    col_feats['sol_frac'] = s['col']['solfracs'].reshape(-1, 1)
-    col_feats['sol_frac'][s['col']['types'] == 3] = 0  # continuous have no fractionality
-    col_feats['basis_status'] = np.zeros((n_cols, 4))  # LOWER BASIC UPPER ZERO
-    col_feats['basis_status'][np.arange(n_cols), s['col']['basestats']] = 1
-    col_feats['reduced_cost'] = s['col']['redcosts'].reshape(-1, 1) / obj_norm
-    col_feats['age'] = s['col']['ages'].reshape(-1, 1) / (s['stats']['nlps'] + 5)
-    col_feats['sol_val'] = s['col']['solvals'].reshape(-1, 1)
-    col_feats['inc_val'] = s['col']['incvals'].reshape(-1, 1)
-    col_feats['avg_inc_val'] = s['col']['avgincvals'].reshape(-1, 1)
-
-    col_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
-                      col_feats.items()]
-    col_feat_names = [n for names in col_feat_names for n in names]
-    col_feat_vals = np.concatenate(list(col_feats.values()), axis=-1)
-
-    variable_features = {'names': col_feat_names, 'values': col_feat_vals, }
-
-    # Row features
-
-    if 'state' in buffer:
-        row_feats = buffer['state']['row_feats']
-        has_lhs = buffer['state']['has_lhs']
-        has_rhs = buffer['state']['has_rhs']
-    else:
-        row_feats = {}
-        has_lhs = np.nonzero(~np.isnan(s['row']['lhss']))[0]
-        has_rhs = np.nonzero(~np.isnan(s['row']['rhss']))[0]
-        row_feats['obj_cosine_similarity'] = np.concatenate(
-            (-s['row']['objcossims'][has_lhs], +s['row']['objcossims'][has_rhs])).reshape(-1, 1)
-        row_feats['bias'] = np.concatenate(
-            (-(s['row']['lhss'] / row_norms)[has_lhs], +(s['row']['rhss'] / row_norms)[has_rhs])).reshape(-1, 1)
-
-    row_feats['is_tight'] = np.concatenate((s['row']['is_at_lhs'][has_lhs], s['row']['is_at_rhs'][has_rhs])).reshape(-1,
-                                                                                                                     1)
-
-    row_feats['age'] = np.concatenate((s['row']['ages'][has_lhs], s['row']['ages'][has_rhs])).reshape(-1, 1) / (
-            s['stats']['nlps'] + 5)
-
-    # # redundant with is_tight
-    # tmp = s['row']['basestats']  # LOWER BASIC UPPER ZERO
-    # tmp[s['row']['lhss'] == s['row']['rhss']] = 4  # LOWER == UPPER for equality constraints
-    # tmp_l = tmp[has_lhs]
-    # tmp_l[tmp_l == 2] = 1  # LHS UPPER -> BASIC
-    # tmp_l[tmp_l == 4] = 2  # EQU UPPER -> UPPER
-    # tmp_l[tmp_l == 0] = 2  # LHS LOWER -> UPPER
-    # tmp_r = tmp[has_rhs]
-    # tmp_r[tmp_r == 0] = 1  # RHS LOWER -> BASIC
-    # tmp_r[tmp_r == 4] = 2  # EQU LOWER -> UPPER
-    # tmp = np.concatenate((tmp_l, tmp_r)) - 1  # BASIC UPPER ZERO
-    # row_feats['basis_status'] = np.zeros((len(has_lhs) + len(has_rhs), 3))
-    # row_feats['basis_status'][np.arange(len(has_lhs) + len(has_rhs)), tmp] = 1
-
-    tmp = s['row']['dualsols'] / (row_norms * obj_norm)
-    row_feats['dualsol_val_normalized'] = np.concatenate((-tmp[has_lhs], +tmp[has_rhs])).reshape(-1, 1)
-
-    row_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
-                      row_feats.items()]
-    row_feat_names = [n for names in row_feat_names for n in names]
-    row_feat_vals = np.concatenate(list(row_feats.values()), axis=-1)
-
-    constraint_features = {'names': row_feat_names, 'values': row_feat_vals, }
-
-    # Edge features
-    if 'state' in buffer:
-        edge_row_idxs = buffer['state']['edge_row_idxs']
-        edge_col_idxs = buffer['state']['edge_col_idxs']
-        edge_feats = buffer['state']['edge_feats']
-    else:
-        coef_matrix = sp.csr_matrix((s['nzrcoef']['vals'] / row_norms[s['nzrcoef']['rowidxs']],
-                                     (s['nzrcoef']['rowidxs'], s['nzrcoef']['colidxs'])),
-                                    shape=(len(s['row']['nnzrs']), len(s['col']['types'])))
-        coef_matrix = sp.vstack((-coef_matrix[has_lhs, :], coef_matrix[has_rhs, :])).tocoo(copy=False)
-
-        edge_row_idxs, edge_col_idxs = coef_matrix.row, coef_matrix.col
-        edge_feats = {}
-
-        edge_feats['coef_normalized'] = coef_matrix.data.reshape(-1, 1)
-
-    edge_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
-                       edge_feats.items()]
-    edge_feat_names = [n for names in edge_feat_names for n in names]
-    edge_feat_indices = np.vstack([edge_row_idxs, edge_col_idxs])
-    edge_feat_vals = np.concatenate(list(edge_feats.values()), axis=-1)
-
-    edge_features = {'names': edge_feat_names, 'indices': edge_feat_indices, 'values': edge_feat_vals, }
-
-    if 'state' not in buffer:
-        buffer['state'] = {'obj_norm': obj_norm, 'col_feats': col_feats, 'row_feats': row_feats, 'has_lhs': has_lhs,
-                           'has_rhs': has_rhs, 'edge_row_idxs': edge_row_idxs, 'edge_col_idxs': edge_col_idxs,
-                           'edge_feats': edge_feats, }
-
-    return constraint_features, edge_features, variable_features
+    # Set time settings.
+    model.setRealParam('limits/time', 3600)
+    if cpu_clock:
+        model.setIntParam('timing/clocktype', 1)
 
 
 def valid_seed(seed):
@@ -567,3 +433,66 @@ def load_flat_samples(filename, feat_type, label_type, augment_feats, normalize_
         raise ValueError(f"Invalid label type: '{label_type}'")
 
     return cand_states, cand_labels, best_cand_idx
+
+
+def load_batch_gcnn(sample_files):
+    """
+    Loads and concatenates a bunch of samples into one mini-batch.
+    """
+    c_features = []
+    e_indices = []
+    e_features = []
+    v_features = []
+    candss = []
+    cand_choices = []
+    cand_scoress = []
+
+    # load samples
+    for filename in sample_files:
+        with gzip.open(filename, 'rb') as f:
+            sample = pickle.load(f)
+
+        sample_state, _, sample_action, sample_cands, cand_scores = sample['data']
+
+        sample_cands = np.array(sample_cands)
+        cand_choice = np.where(sample_cands == sample_action)[0][0]  # action index relative to candidates
+
+        c, e, v = sample_state
+        c_features.append(c['values'])
+        e_indices.append(e['indices'])
+        e_features.append(e['values'])
+        v_features.append(v['values'])
+        candss.append(sample_cands)
+        cand_choices.append(cand_choice)
+        cand_scoress.append(cand_scores)
+
+    n_cs_per_sample = [c.shape[0] for c in c_features]
+    n_vs_per_sample = [v.shape[0] for v in v_features]
+    n_cands_per_sample = [cds.shape[0] for cds in candss]
+
+    # concatenate samples in one big graph
+    c_features = np.concatenate(c_features, axis=0)
+    v_features = np.concatenate(v_features, axis=0)
+    e_features = np.concatenate(e_features, axis=0)
+    # edge indices have to be adjusted accordingly
+    cv_shift = np.cumsum([[0] + n_cs_per_sample[:-1], [0] + n_vs_per_sample[:-1]], axis=1)
+    e_indices = np.concatenate([e_ind + cv_shift[:, j:(j + 1)] for j, e_ind in enumerate(e_indices)], axis=1)
+    # candidate indices as well
+    candss = np.concatenate([cands + shift for cands, shift in zip(candss, cv_shift[1])])
+    cand_choices = np.array(cand_choices)
+    cand_scoress = np.concatenate(cand_scoress, axis=0)
+
+    # convert to tensors
+    c_features = tf.convert_to_tensor(c_features, dtype=tf.float32)
+    e_indices = tf.convert_to_tensor(e_indices, dtype=tf.int32)
+    e_features = tf.convert_to_tensor(e_features, dtype=tf.float32)
+    v_features = tf.convert_to_tensor(v_features, dtype=tf.float32)
+    n_cs_per_sample = tf.convert_to_tensor(n_cs_per_sample, dtype=tf.int32)
+    n_vs_per_sample = tf.convert_to_tensor(n_vs_per_sample, dtype=tf.int32)
+    candss = tf.convert_to_tensor(candss, dtype=tf.int32)
+    cand_choices = tf.convert_to_tensor(cand_choices, dtype=tf.int32)
+    cand_scoress = tf.convert_to_tensor(cand_scoress, dtype=tf.float32)
+    n_cands_per_sample = tf.convert_to_tensor(n_cands_per_sample, dtype=tf.int32)
+
+    return c_features, e_indices, e_features, v_features, n_cs_per_sample, n_vs_per_sample, n_cands_per_sample, \
+           candss, cand_choices,

@@ -1,20 +1,22 @@
-"""This module is used to collect training data.
+"""This module is used to collect data for training, validation, and testing.
 
 Summary
 =======
-This module provides methods for randomly generated set covering, combinatorial auction, capacitated facility location,
-and maximum independent set problem instances. The methods in this module are based on [1]_.
+This module provides methods for collecting data for imitation learning, based on an expert decision rule that ranks
+cuts by their bound improvement. The methods in this module are based on [1]_.
 
 Classes
 ========
-- :class:`Graph`: Data type for a general graph structure with methods for random graph generation.
+- :class:`SamplingAgent`: A cut selector used for sampling expert (state, action) pairs.
 
 Functions
 =========
-- :func:`generate_setcov`: Generates a random set cover problem instance.
-- :func:`generate_combauc`: Generates a random combinatorial auction problem instance.
-- :func:`generate_capfac`: Generates a random capacitated facility location problem instance.
-- :func:`generate_indset`: Generates a random maximum independent set problem instance.
+- :func:`collect_data`: Collects data in accordance with our sampling scheme.
+- :func:`collect_problem`: Collects samples for a single problem type.
+- :func:`collect_samples`: Runs branch-and-cut episodes on the given set of instances, and collects randomly queried
+  (state, action) pairs from an expert decision rule based on bound improvement.
+- :func:`send_tasks`: Dispatcher loop: continuously send tasks to the task queue.
+- :func:`generate_samples`: Worker loop: fetch an instance, run an episode, and send samples to the out queue.
 
 References
 ==========
@@ -23,7 +25,6 @@ References
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
 
-import argparse
 import glob
 import gzip
 import multiprocessing as mp
@@ -35,55 +36,102 @@ import numpy as np
 from pyscipopt import Model, SCIP_LPSOLSTAT, SCIP_RESULT
 from pyscipopt.scip import Cutsel
 
+import utils
+
 
 class SamplingAgent(Cutsel):
-    """Cut selector.
+    """Cut selector used for sampling expert (state, action) pairs.
 
-        Sampling: add expert query probability, otherwise fall back to a static hybrid branching rule.
-        Deployment: do not use gap, just call the neural network.
-        """
+    This class extends PySCIPOpt's Cutsel class for user-defined cut selector plugins.
 
-    def __init__(self, p_max, p_max_ub, skip_factor):
+    Methods
+    =======
+    - :meth:`cutselselect`: This method is called whenever cuts need to be ranked.
+
+    :ivar episode: The episode number (instance/seed combination).
+    :ivar instance: The filepath to the current instance.
+    :ivar out_queue: The out queue where the sampling agent should send samples to.
+    :ivar out_dir: The save file path for samples.
+    :ivar seed: A seed value for the random number generator.
+    :ivar p_expert: The probability of querying the expert on each cut selection round.
+    :ivar p_max: The maximum parallelism for low-quality cuts.
+    :ivar p_max_ub: The maximum parallelism for high-quality cuts.
+    :ivar skip_factor: The factor that determines the high-quality threshold relative to the highest-quality cut.
+    """
+
+    def __init__(self, episode: int, instance: str, out_queue: mp.SimpleQueue, out_dir: str, seed: int, p_expert=0.05,
+                 p_max=0.1, p_max_ub=0.5, skip_factor=0.9):
+        self.episode = episode
+        self.instance = instance
+        self.out_queue = out_queue
+        self.out_dir = out_dir
+        self.seed = seed
+
+        self.p_expert = p_expert
         self.p_max = p_max
         self.p_max_ub = p_max_ub
         self.skip_factor = skip_factor
 
+        self.sample_counter = 0
+        self.rng = np.random.default_rng(seed)
+
     def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
-        improvements = np.zeros(len(cuts))
-        bound = self.model.getLPObjVal()
 
-        # For each candidate cut, determine the relative bound improvement compared to the current LP solution.
-        for i in range(len(cuts)):
-            cut = cuts[i]
-            self.model.startDive()
+        query_expert = self.rng.random() < self.p_expert
+        if query_expert:
+            # Rank all cuts based on their bound improvement, and record the expert (state, action) pair.
+            quality = np.zeros(len(cuts))
+            bound = self.model.getLPObjVal()
 
-            # Add the cut to the LP relaxation and solve it.
-            self.model.addRowDive(cut)
-            self.model.constructLP()
-            self.model.solveDiveLP()
+            # For each candidate cut, determine the relative bound improvement compared to the current LP solution.
+            uneventful = True
+            for i in range(len(cuts)):
+                cut = cuts[i]
+                self.model.startDive()
 
-            # Make sure that the LP bound is feasible.
-            cut_bound = 0
-            solstat = self.model.getLPSolstat()
-            if solstat != SCIP_LPSOLSTAT.ITERLIMIT and solstat != SCIP_LPSOLSTAT.TIMELIMIT:
-                cut_bound = self.model.getLPObjVal()
+                # Add the cut to the LP relaxation and solve it.
+                self.model.addRowDive(cut)
+                self.model.constructLP()
+                self.model.solveDiveLP()
 
-            # Compute the relative bound improvement.
-            improvements[i] = abs(bound - cut_bound) / abs(bound)
-            self.model.endDive()
+                # Make sure that the LP bound is feasible.
+                quality[i] = -np.Inf
+                solstat = self.model.getLPSolstat()
+                if solstat != SCIP_LPSOLSTAT.ITERLIMIT and solstat != SCIP_LPSOLSTAT.TIMELIMIT:
+                    cut_bound = self.model.getLPObjVal()
 
-        # Rank the cuts in descending order of relative bound improvement.
-        rankings = sorted(range(len(cuts)), key=lambda x: improvements[x], reverse=True)
+                    # Compute the relative bound improvement.
+                    quality[i] = abs(bound - cut_bound) / abs(bound)
+                else:
+                    # Do not record this (state, action) pair if SCIP hit a limit during solving.
+                    uneventful = False
+                    break
+                self.model.endDive()
+
+            if uneventful:
+                # Record the state, action, and action set.
+                state = utils.get_state(self.model, cuts)
+                data = [state, quality, cuts]
+
+                filename = f'{self.out_dir}/sample_{self.episode}_{self.sample_counter}.pkl'
+                with gzip.open(filename, 'wb') as file:
+                    pickle.dump({'data': data}, file)
+                self.out_queue.put(
+                    {'type': 'sample', 'episode': self.episode, 'instance': self.instance, 'filename': filename})
+                self.sample_counter += 1
+
+        if not query_expert or not uneventful:
+            # Fall back to a hybrid branching rule.
+            quality = [self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
+                cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(
+                cut) + 0.5 * self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in cuts]
+
+        # Rank the cuts in descending order of quality.
+        rankings = sorted(range(len(cuts)), key=lambda x: quality[x], reverse=True)
         sorted_cuts = np.array([cuts[rank] for rank in rankings])
 
-        # Sort relative bound improvements in descending order as well to match the array with sorted cuts.
-        improvements = -np.sort(-improvements)
-
-        # Other metrics.
-        directed_cutoff = [self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in sorted_cuts]
-        efficacy = [self.model.getCutEfficacy(cut) for cut in sorted_cuts]
-        integral_support = [self.model.getRowNumIntCols(cut) / cut.getNNonz() for cut in sorted_cuts]
-        objective_parallelism = [self.model.getRowObjParallelism(cut) for cut in sorted_cuts]
+        # Sort cut quality in descending order as well to match the array with sorted cuts.
+        quality = -np.sort(-quality)
 
         # First check whether any cuts are parallel to forced cuts.
         n_selected = len(cuts)
@@ -94,7 +142,7 @@ class SamplingAgent(Cutsel):
             marked = parallelism > self.p_max
 
             # Only remove low-quality or very parallel cuts.
-            low_quality = np.logical_or(improvements < 0.9 * improvements[0], parallelism > self.p_max_ub)
+            low_quality = np.logical_or(quality < 0.9 * quality[0], parallelism > self.p_max_ub)
             to_remove = np.logical_and(marked, low_quality)
 
             # Move cuts that are marked for removal to the back and decrease number of selected cuts.
@@ -113,7 +161,7 @@ class SamplingAgent(Cutsel):
             marked = parallelism > self.p_max
 
             # Only remove low-quality or very parallel cuts.
-            low_quality = np.logical_or(improvements < 0.9 * improvements[0], parallelism > self.p_max_ub)
+            low_quality = np.logical_or(quality < 0.9 * quality[0], parallelism > self.p_max_ub)
             to_remove = np.logical_and(marked, low_quality)
 
             # Move cuts that are marked for removal to the back and decrease number of selected cuts.
@@ -126,210 +174,126 @@ class SamplingAgent(Cutsel):
         return {'cuts': sorted_cuts, 'nselectedcuts': min(n_selected, maxnselectedcuts), 'result': SCIP_RESULT.SUCCESS}
 
 
-class SamplingAgent(scip.Branchrule):
+def collect_data(n_jobs: int, seed: int):
+    """Collects samples for set covering, combinatorial auction, capacitated facility location, and independent set
+    problems in accordance with our sampling scheme.
 
-    def __init__(self, episode, instance, seed, out_queue, exploration_policy, query_expert_prob, out_dir,
-                 follow_expert=True):
-        self.episode = episode
-        self.instance = instance
-        self.seed = seed
-        self.out_queue = out_queue
-        self.exploration_policy = exploration_policy
-        self.query_expert_prob = query_expert_prob
-        self.out_dir = out_dir
-        self.follow_expert = follow_expert
-
-        self.rng = np.random.RandomState(seed)
-        self.new_node = True
-        self.sample_counter = 0
-
-    def branchinit(self):
-        self.khalil_root_buffer = {}
-
-    def branchexeclp(self, allowaddcons):
-
-        # if self.model.getNNodes() == 1:
-        # initialize root buffer for Khalil features extraction
-        # utilities.extract_khalil_variable_features(self.model, [], self.khalil_root_buffer)
-
-        # once in a while, also run the expert policy and record the (state, action) pair
-        query_expert = self.rng.rand() < self.query_expert_prob
-        if query_expert:
-            state = utilities.extract_state(self.model)
-            cands, *_ = self.model.getPseudoBranchCands()
-            # state_khalil = utilities.extract_khalil_variable_features(self.model, cands, self.khalil_root_buffer)
-
-            # Get expert decision.
-            result = self.model.executeBranchRule('vanillafullstrong', allowaddcons)
-            cands_, scores, npriocands, bestcand = self.model.getVanillafullstrongData()
-
-            assert result == SCIP_RESULT.DIDNOTRUN
-            assert all([c1.getCol().getLPPos() == c2.getCol().getLPPos() for c1, c2 in zip(cands, cands_)])
-
-            action_set = [c.getCol().getLPPos() for c in cands]
-            expert_action = action_set[bestcand]
-
-            data = [state, state_khalil, expert_action, action_set, scores]
-
-            # Do not record inconsistent scores. May happen if SCIP was early stopped (time limit).
-            if not any([s < 0 for s in scores]):
-                filename = f'{self.out_dir}/sample_{self.episode}_{self.sample_counter}.pkl'
-                with gzip.open(filename, 'wb') as f:
-                    pickle.dump({'episode': self.episode, 'instance': self.instance, 'seed': self.seed,
-                                 'node_number': self.model.getCurrentNode().getNumber(),
-                                 'node_depth': self.model.getCurrentNode().getDepth(), 'data': data, }, f)
-
-                self.out_queue.put(
-                    {'type': 'sample', 'episode': self.episode, 'instance': self.instance, 'seed': self.seed,
-                     'node_number': self.model.getCurrentNode().getNumber(),
-                     'node_depth': self.model.getCurrentNode().getDepth(), 'filename': filename, })
-
-                self.sample_counter += 1
-
-        # if exploration and expert policies are the same, prevent running it twice
-        if not query_expert or (not self.follow_expert and self.exploration_policy != 'vanillafullstrong'):
-            result = self.model.executeBranchRule(self.exploration_policy, allowaddcons)
-
-        # apply 'vanillafullstrong' branching decision if needed
-        if query_expert and self.follow_expert or self.exploration_policy == 'vanillafullstrong':
-            assert result == SCIP_RESULT.DIDNOTRUN
-            cands, scores, npriocands, bestcand = self.model.getVanillafullstrongData()
-            self.model.branchVar(cands[bestcand])
-            result = SCIP_RESULT.BRANCHED
-
-        return {"result": result}
-
-
-def make_samples(in_queue, out_queue):
-    """
-    Worker loop: fetch an instance, run an episode and record samples.
-    Parameters
-    ----------
-    in_queue : multiprocessing.Queue
-        Input queue from which orders are received.
-    out_queue : multiprocessing.Queue
-        Output queue in which to send samples.
+    :param n_jobs: The number of jobs to run in parallel.
+    :param seed: A seed value for the random number generator.
     """
 
-    while True:
-        episode, instance, seed, exploration_policy, query_expert_prob, time_limit, out_dir = in_queue.get()
-        print(f'[w {os.getpid()}] episode {episode}, seed {seed}, processing instance \'{instance}\'...')
+    seed_generator = np.random.default_rng(seed)
+    seeds = seed_generator.integers(2 ** 32, size=4)
 
-        m = Model()
-        m.setIntParam('display/verblevel', 0)
-        m.readProblem(f'{instance}')
-        utilities.init_scip_params(m, seed=seed)
-        m.setIntParam('timing/clocktype', 2)
-        m.setRealParam('limits/time', time_limit)
+    print("Collecting set covering instance data...")
+    train = glob.glob('data/instances/setcov/train_500r/*.lp')
+    valid = glob.glob('data/instances/setcov/valid_500r/*.lp')
+    test = glob.glob('data/instances/setcov/test_500r/*.lp')
+    out_dir = 'data/samples/setcov/500r'
+    collect_problem(train, valid, test, out_dir, n_jobs, seeds[0])
+    print("")
 
-        branchrule = SamplingAgent(episode=episode, instance=instance, seed=seed, out_queue=out_queue,
-                                   exploration_policy=exploration_policy, query_expert_prob=query_expert_prob,
-                                   out_dir=out_dir)
+    print("Collecting combinatorial auction instance data...")
+    train = glob.glob('data/instances/combauc/train_100i_500b/*.lp')
+    valid = glob.glob('data/instances/combauc/valid_100i_500b/*.lp')
+    test = glob.glob('data/instances/combauc/test_100i_500b/*.lp')
+    out_dir = 'data/samples/combauc/100i_500b'
+    collect_problem(train, valid, test, out_dir, n_jobs, seeds[1])
+    print("")
 
-        m.includeBranchrule(branchrule=branchrule, name="Sampling branching rule", desc="", priority=666666,
-                            maxdepth=-1, maxbounddist=1)
+    print("Collecting capacitated facility instance data...")
+    train = glob.glob('data/instances/capfac/train_100c/*.lp')
+    valid = glob.glob('data/instances/capfac/valid_100c/*.lp')
+    test = glob.glob('data/instances/capfac/test_100c/*.lp')
+    out_dir = 'data/samples/capfac/100c'
+    collect_problem(train, valid, test, out_dir, n_jobs, seeds[2])
+    print("")
 
-        m.setBoolParam('branching/vanillafullstrong/integralcands', True)
-        m.setBoolParam('branching/vanillafullstrong/scoreall', True)
-        m.setBoolParam('branching/vanillafullstrong/collectscores', True)
-        m.setBoolParam('branching/vanillafullstrong/donotbranch', True)
-        m.setBoolParam('branching/vanillafullstrong/idempotent', True)
-
-        out_queue.put({'type': 'start', 'episode': episode, 'instance': instance, 'seed': seed, })
-
-        m.optimize()
-        m.freeProb()
-
-        print(f"[w {os.getpid()}] episode {episode} done, {branchrule.sample_counter} samples")
-
-        out_queue.put({'type': 'done', 'episode': episode, 'instance': instance, 'seed': seed, })
+    print("Collecting maximum independent set instance data...")
+    train = glob.glob('data/instances/indset/train_500n/*.lp')
+    valid = glob.glob('data/instances/indset/valid_500n/*.lp')
+    test = glob.glob('data/instances/indset/test_500n/*.lp')
+    out_dir = 'data/samples/indset/500n'
+    collect_problem(train, valid, test, out_dir, n_jobs, seeds[3])
 
 
-def send_orders(orders_queue, instances, seed, exploration_policy, query_expert_prob, time_limit, out_dir):
+def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir: str, n_jobs: int, seed: int,
+                    n_train=100000, n_valid=20000, n_test=20000):
+    """Collects samples for a single problem type.
+
+    :param train: A list of filepaths to training instances.
+    :param valid: A list of filepaths to validation instances.
+    :param test: A list of filepaths to testing instances.
+    :param out_dir: The desired location for saving the collected samples.
+    :param n_jobs: The number of jobs to run in parallel.
+    :param seed: A seed value for the random number generator.
+    :param n_train: The desired number of training samples.
+    :param n_valid: The desired number of validation samples.
+    :param n_test: The desired number of testing samples.
     """
-    Continuously send sampling orders to workers (relies on limited
-    queue capacity).
-    Parameters
-    ----------
-    orders_queue : multiprocessing.Queue
-        Queue to which to send orders.
-    instances : list
-        Instance file names from which to sample episodes.
-    seed : int
-        Random seed for reproducibility.
-    exploration_policy : str
-        Branching strategy for exploration.
-    query_expert_prob : float in [0, 1]
-        Probability of running the expert strategy and collecting samples.
-    time_limit : float in [0, 1e+20]
-        Maximum running time for an episode, in seconds.
-    out_dir: str
-        Output directory in which to write samples.
-    """
-    rng = np.random.RandomState(seed)
 
-    episode = 0
-    while True:
-        instance = rng.choice(instances)
-        seed = rng.randint(2 ** 32)
-        orders_queue.put([episode, instance, seed, exploration_policy, query_expert_prob, time_limit, out_dir])
-        episode += 1
+    os.makedirs(out_dir)
+    seed_generator = np.random.default_rng(seed)
+    seeds = seed_generator.integers(2 ** 32, size=3)
+
+    rng = np.random.default_rng(seeds[0])
+    collect_samples(train, out_dir + '/train', rng, n_train, n_jobs)
+
+    rng = np.random.default_rng(seeds[1])
+    collect_samples(valid, out_dir + '/valid', rng, n_valid, n_jobs)
+
+    rng = np.random.default_rng(seeds[2])
+    collect_samples(test, out_dir + '/test', rng, n_test, n_jobs)
 
 
-def collect_samples(instances, out_dir, rng, n_samples, n_jobs, exploration_policy, query_expert_prob, time_limit):
+def collect_samples(instances: list[str], out_dir: str, rng: np.random.Generator, n_samples: int, n_jobs: int):
+    """Runs branch-and-cut episodes on the given set of instances, and collects randomly queried (state,
+    action) pairs from an expert decision rule based on bound improvement.
+
+    The sampling is parallelized over multiple cores. A dispatcher sends tasks to a task queue, which are then
+    processed by the workers. The workers send the results to an out queue, and finished samples are written to a
+    file. The task queue contains 'start' orders, which signal a worker to start working on a given instance with a
+    given seed value (an episode). The out queue contains finished samples (orders of type 'sample'), 'start' orders
+    that signal that an episode has started, and 'done' orders that signal that an episode is finished. Multiple
+    episodes are processed concurrently, but samples are written one episode at a time.
+
+    :param instances: A list of filepaths to instances to use for sampling.
+    :param n_samples: The desired number of samples.
+    :param out_dir: The desired location for saving the collected samples.
+    :param n_jobs: The number of jobs to run in parallel.
+    :param rng: A random number generator.
     """
-    Runs branch-and-bound episodes on the given set of instances, and collects
-    randomly (state, action) pairs from the 'vanilla-fullstrong' expert
-    brancher.
-    Parameters
-    ----------
-    instances : list
-        Instance files from which to collect samples.
-    out_dir : str
-        Directory in which to write samples.
-    rng : numpy.random.RandomState
-        A random number generator for reproducibility.
-    n_samples : int
-        Number of samples to collect.
-    n_jobs : int
-        Number of jobs for parallel sampling.
-    exploration_policy : str
-        Exploration policy (branching rule) for sampling.
-    query_expert_prob : float in [0, 1]
-        Probability of using the expert policy and recording a (state, action)
-        pair.
-    time_limit : float in [0, 1e+20]
-        Maximum running time for an episode, in seconds.
-    """
+
     os.makedirs(out_dir, exist_ok=True)
 
-    # start workers
-    orders_queue = mp.Queue(maxsize=2 * n_jobs)
-    answers_queue = mp.SimpleQueue()
+    # Start workers, which process orders from the in queue and send samples to the out queue.
+    task_queue = mp.Queue(maxsize=2 * n_jobs)
+    out_queue = mp.SimpleQueue()
     workers = []
     for i in range(n_jobs):
-        p = mp.Process(target=make_samples, args=(orders_queue, answers_queue), daemon=True)
+        p = mp.Process(target=generate_samples, args=(task_queue, out_queue), daemon=True)
         workers.append(p)
         p.start()
 
-    tmp_samples_dir = f'{out_dir}/tmp'
-    os.makedirs(tmp_samples_dir, exist_ok=True)
+    # Create a temporary directory.
+    tmp_dir = f'{out_dir}/tmp'
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    # start dispatcher
-    dispatcher = mp.Process(target=send_orders, args=(
-        orders_queue, instances, rng.randint(2 ** 32), exploration_policy, query_expert_prob, time_limit,
-        tmp_samples_dir), daemon=True)
+    # Start dispatcher, which sends tasks to the in queue.
+    dispatcher = mp.Process(target=send_tasks, args=(task_queue, instances, rng.integers(2 ** 32), tmp_dir),
+                            daemon=True)
     dispatcher.start()
 
-    # record answers and write samples
+    # Record and write finished samples received in the out queue.
     buffer = {}
     current_episode = 0
     i = 0
     in_buffer = 0
+    progress = 1
     while i < n_samples:
-        sample = answers_queue.get()
+        sample = out_queue.get()
 
-        # add received sample to buffer
+        # Add received sample to buffer.
         if sample['type'] == 'start':
             buffer[sample['episode']] = []
         else:
@@ -337,104 +301,91 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs, exploration_poli
             if sample['type'] == 'sample':
                 in_buffer += 1
 
-        # if any, write samples from current episode
+        # Write samples from current episode, if any.
         while current_episode in buffer and buffer[current_episode]:
-            samples_to_write = buffer[current_episode]
+            samples = buffer[current_episode]
             buffer[current_episode] = []
 
-            for sample in samples_to_write:
-
-                # if no more samples here, move to next episode
+            for sample in samples:
                 if sample['type'] == 'done':
+                    # Received signal that the optimization for this episode finished, so move on to next episode.
                     del buffer[current_episode]
                     current_episode += 1
-
-                # else write sample
                 else:
+                    # Write sample.
                     os.rename(sample['filename'], f'{out_dir}/sample_{i + 1}.pkl')
                     in_buffer -= 1
                     i += 1
-                    print(
-                        f"[m {os.getpid()}] {i} / {n_samples} samples written, ep {sample['episode']} ({in_buffer} in "
-                        f"buffer).")
 
-                    # early stop dispatcher (hard)
+                    # Stop the dispatcher as soon as the number of samples collected and in buffer exceeds the
+                    # required number of samples.
                     if in_buffer + i >= n_samples and dispatcher.is_alive():
                         dispatcher.terminate()
-                        print(f"[m {os.getpid()}] dispatcher stopped...")
 
-                    # as soon as enough samples are collected, stop
+                    # As soon as the required number of samples is collected, clear the buffer and stop.
                     if i == n_samples:
                         buffer = {}
                         break
+        if i / n_samples > 0.1 * progress:
+            print(f"Progress: {progress}0%")
+            progress += 1
 
-    # stop all workers (hard)
+    # Stop all workers.
     for p in workers:
         p.terminate()
 
-    shutil.rmtree(tmp_samples_dir, ignore_errors=True)
+    # Remove temporary directory.
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('problem', help='MILP instance type to process.',
-                        choices=['setcover', 'cauctions', 'facilities', 'indset'], )
-    parser.add_argument('-s', '--seed', help='Random generator seed.', type=utilities.valid_seed, default=0, )
-    parser.add_argument('-j', '--njobs', help='Number of parallel jobs.', type=int, default=1, )
-    args = parser.parse_args()
+def send_tasks(task_queue, instances, out_dir, seed):
+    """Dispatcher loop: continuously send tasks to the task queue.
 
-    print(f"seed {args.seed}")
+    The tasks signal a worker to start working on a given instance with a given seed value (an episode). This loop
+    relies on limited queue capacity, as it continuously sends tasks.
 
-    train_size = 100000
-    valid_size = 20000
-    test_size = 20000
-    exploration_strategy = 'pscost'
-    node_record_prob = 0.05
-    time_limit = 3600
+    :param task_queue: The task queue to send tasks to.
+    :param instances: The list of possible instances to sample from.
+    :param out_dir: The desired location for saving the collected samples.
+    :param seed: A seed value for the random number generator.
+    """
 
-    if args.problem == 'setcover':
-        instances_train = glob.glob('data/instances/setcover/train_500r_1000c_0.05d/*.lp')
-        instances_valid = glob.glob('data/instances/setcover/valid_500r_1000c_0.05d/*.lp')
-        instances_test = glob.glob('data/instances/setcover/test_500r_1000c_0.05d/*.lp')
-        out_dir = 'data/samples/setcover/500r_1000c_0.05d'
+    rng = np.random.default_rng(seed)
 
-    elif args.problem == 'cauctions':
-        instances_train = glob.glob('data/instances/cauctions/train_100_500/*.lp')
-        instances_valid = glob.glob('data/instances/cauctions/valid_100_500/*.lp')
-        instances_test = glob.glob('data/instances/cauctions/test_100_500/*.lp')
-        out_dir = 'data/samples/cauctions/100_500'
+    episode = 0
+    while True:
+        instance = rng.choice(instances)
+        seed = rng.integers(2 ** 32)
+        task_queue.put([episode, instance, out_dir, seed])
+        episode += 1
 
-    elif args.problem == 'indset':
-        instances_train = glob.glob('data/instances/indset/train_500_4/*.lp')
-        instances_valid = glob.glob('data/instances/indset/valid_500_4/*.lp')
-        instances_test = glob.glob('data/instances/indset/test_500_4/*.lp')
-        out_dir = 'data/samples/indset/500_4'
 
-    elif args.problem == 'facilities':
-        instances_train = glob.glob('data/instances/facilities/train_100_100_5/*.lp')
-        instances_valid = glob.glob('data/instances/facilities/valid_100_100_5/*.lp')
-        instances_test = glob.glob('data/instances/facilities/test_100_100_5/*.lp')
-        out_dir = 'data/samples/facilities/100_100_5'
-        time_limit = 600
+def generate_samples(task_queue, out_queue):
+    """Worker loop: fetch an instance, run an episode, and send samples to the out queue.
 
-    else:
-        raise NotImplementedError
+    :param task_queue: The task queue from which the worker needs to fetch tasks.
+    :param out_queue: The out queue to which the worker should send finished samples and 'done' orders.
+    """
 
-    print(f"{len(instances_train)} train instances for {train_size} samples")
-    print(f"{len(instances_valid)} validation instances for {valid_size} samples")
-    print(f"{len(instances_test)} test instances for {test_size} samples")
+    while True:
+        # Fetch a task.
+        episode, instance, out_dir, seed = task_queue.get()
 
-    # create output directory, throws an error if it already exists
-    os.makedirs(out_dir)
+        # Initialize the model.
+        model = Model()
+        utils.init_scip(model, seed)
+        model.readProblem(f'{instance}')
 
-    rng = np.random.RandomState(args.seed)
-    collect_samples(instances_train, out_dir + '/train', rng, train_size, args.njobs,
-                    exploration_policy=exploration_strategy, query_expert_prob=node_record_prob, time_limit=time_limit)
+        # Include the sampling agent as cut selector to extract (state, action) pairs.
+        cut_selector = SamplingAgent(episode, instance, out_queue, out_dir, seed)
+        model.includeCutsel(cut_selector, 'sampler', 'samples expert decisions', 5000000)
 
-    rng = np.random.RandomState(args.seed + 1)
-    collect_samples(instances_valid, out_dir + '/valid', rng, test_size, args.njobs,
-                    exploration_policy=exploration_strategy, query_expert_prob=node_record_prob, time_limit=time_limit)
+        # Signal that the episode has started.
+        out_queue.put({'type': 'start', 'episode': episode})
 
-    rng = np.random.RandomState(args.seed + 2)
-    collect_samples(instances_test, out_dir + '/test', rng, test_size, args.njobs,
-                    exploration_policy=exploration_strategy, query_expert_prob=node_record_prob, time_limit=time_limit)
+        # Process the episode.
+        model.optimize()
+        model.freeProb()
+
+        # Signal that the episode has finished.
+        out_queue.put({'type': 'done', 'episode': episode})

@@ -89,7 +89,7 @@ class Graph:
         return cliques
 
     @staticmethod
-    def erdos_renyi(n_nodes: int, p_edge: float, rng: np.random.RandomState):
+    def erdos_renyi(n_nodes: int, p_edge: float, rng: np.random.Generator):
         """Generates an Erdős-Rényi random graph with a given edge probability.
 
         :param n_nodes: The number of nodes in the graph.
@@ -110,7 +110,7 @@ class Graph:
         return Graph(n_nodes, edges, degrees, neighbors)
 
     @staticmethod
-    def barabasi_albert(n_nodes: int, rng: np.random.RandomState, affinity=4):
+    def barabasi_albert(n_nodes: int, rng: np.random.Generator, affinity=4):
         """Generates a Barabási-Albert random graph with a given affinity (number of connections for each new node).
 
         This method dynamically models a scale-free network, based on the algorithm described in [1]_. We start with
@@ -154,19 +154,23 @@ class Graph:
         return Graph(n_nodes, edges, degrees, neighbors)
 
 
-def generate_instances():
+def generate_instances(seed: int):
     """Generates set covering, combinatorial auction, capacitated facility location, and independent set problem
     instances in accordance with our data generation scheme.
+
+    :param seed: A seed value for the random number generator.
     """
 
-    rng = np.random.RandomState(0)
+    print("Generating instances...")
+    rng = np.random.default_rng(seed)
     generate_setcovs(rng)
     generate_combaucs(rng)
     generate_capfacs(rng)
     generate_indsets(rng)
+    print("Done!")
 
 
-def generate_setcovs(rng: np.random.RandomState):
+def generate_setcovs(rng: np.random.Generator):
     """Generates set covering problem instances in accordance with our data generation scheme.
 
     This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (500x1000).
@@ -232,7 +236,7 @@ def generate_setcovs(rng: np.random.RandomState):
         generate_setcov(n_rows, filepath, rng)
 
 
-def generate_setcov(n_rows: int, filepath: str, rng: np.random.RandomState, n_cols=1000, density=0.05, max_coef=100):
+def generate_setcov(n_rows: int, filepath: str, rng: np.random.Generator, n_cols=1000, density=0.05, max_coef=100):
     """Generates a set covering problem instance and writes it to a CPLEX LP file.
 
     This method is based on the algorithm described in [1]_, and randomly creates a coefficient matrix with the
@@ -281,7 +285,7 @@ def generate_setcov(n_rows: int, filepath: str, rng: np.random.RandomState, n_co
         indptr.append(i)
 
     # Draw objective coefficients from {1, 2, ..., max_coef}.
-    c = rng.randint(max_coef, size=n_cols) + 1
+    c = rng.integers(max_coef, size=n_cols) + 1
 
     # Sparce CSC to sparse CSR matrix.
     matrix = scipy.sparse.csc_matrix((np.ones(len(indices), dtype=int), indices, indptr),
@@ -303,7 +307,7 @@ def generate_setcov(n_rows: int, filepath: str, rng: np.random.RandomState, n_co
         file.write("".join([f" x{j + 1}" for j in range(n_cols)]))
 
 
-def generate_combaucs(rng: np.random.RandomState):
+def generate_combaucs(rng: np.random.Generator):
     """Generates combinatorial auction problem instances in accordance with our data generation scheme.
 
     This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (100x500).
@@ -382,7 +386,7 @@ def generate_combaucs(rng: np.random.RandomState):
         generate_combauc(n_items, n_bids, filepath, rng)
 
 
-def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.RandomState, min_value=1, max_value=100,
+def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Generator, min_value=1, max_value=100,
                      max_deviation=0.5, add_prob=0.7, max_sub_bids=5, additivity=0.2, budget_factor=1.5,
                      resale_factor=0.5, integers=False):
     """Generates a combinatorial auction problem instance and writes it to a CPLEX LP file.
@@ -426,7 +430,7 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ra
     assert 0 <= min_value <= max_value
     assert 0 <= add_prob <= 1
 
-    def choose_next(chosen: np.array, compat: np.array, interests: np.array, random: np.random.RandomState):
+    def choose_next(chosen: np.array, compat: np.array, interests: np.array, random: np.random.Generator):
         """Choose a next item with probabilities proportional to item compatibility with chosen items and a bidder's
         interests.
 
@@ -442,10 +446,10 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ra
         return random.choice(items, p=p)
 
     # Randomly generate common resale values for each good between the minimum and maximum value.
-    values = min_value + (max_value - min_value) * rng.rand(n_items)
+    values = min_value + (max_value - min_value) * rng.random(n_items)
 
     # Randomly generate item compatibilities (how likely goods are to appear together in a bundle).
-    compats = np.triu(rng.rand(n_items, n_items), k=1)  # Generate random upper triangle with zero diagonal.
+    compats = np.triu(rng.random((n_items, n_items)), k=1)  # Generate random upper triangle with zero diagonal.
     compats = compats + compats.transpose()  # Make it symmetric (as compatibilities are symmetric).
     compats = compats / compats.sum(1)  # Scale each column by the sum of its elements to form a probability.
 
@@ -455,7 +459,7 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ra
     # Iteratively generate bids, one bidder at a time.
     while len(bids) < n_bids:
         # Add random deviations in interval [-max_value * max_deviation, max_value * max_deviation).
-        bidder_interests = rng.rand(n_items)
+        bidder_interests = rng.random(n_items)
         private_values = values + max_value * max_deviation * (2 * bidder_interests - 1)
 
         # Generate an initial bundle, choosing first item according to bidder interests.
@@ -465,7 +469,7 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ra
         chosen_items[item] = 1
 
         # Add additional items according to item compatibilities and bidder interests.
-        while rng.rand() < add_prob:
+        while rng.random() < add_prob:
             # Stop when there are no items left to choose from.
             if chosen_items.sum() == n_items:
                 break
@@ -567,7 +571,7 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ra
             file.write(f" x{i + 1}")
 
 
-def generate_capfacs(rng: np.random.RandomState):
+def generate_capfacs(rng: np.random.Generator):
     """Generates capacitated facility location problem instances in accordance with our data generation scheme.
 
     This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (100x100).
@@ -633,7 +637,7 @@ def generate_capfacs(rng: np.random.RandomState):
         generate_capfac(n_customers, filepath, rng)
 
 
-def generate_capfac(n_customers: int, filepath: str, rng: np.random.RandomState, n_facilities=100, ratio=5):
+def generate_capfac(n_customers: int, filepath: str, rng: np.random.Generator, n_facilities=100, ratio=5):
     """Generates a capacitated facility location problem instance and writes it to a CPLEX LP file.
 
     This method randomly generates costs, capacities, demands, based on the algorithm described in [1]_. For this
@@ -657,17 +661,17 @@ def generate_capfac(n_customers: int, filepath: str, rng: np.random.RandomState,
     """
 
     # Randomly place facilities on a 1x1 surface.
-    f_x = rng.rand(n_facilities)
-    f_y = rng.rand(n_facilities)
+    f_x = rng.random(n_facilities)
+    f_y = rng.random(n_facilities)
 
     # Randomly place customers on a 1x1 surface.
-    c_x = rng.rand(n_customers)
-    c_y = rng.rand(n_customers)
+    c_x = rng.random(n_customers)
+    c_y = rng.random(n_customers)
 
     # Generate demand, capacities, and fixed costs.
-    demand = rng.randint(5, 35 + 1, size=n_customers)
-    capacities = rng.randint(10, 160 + 1, size=n_facilities)
-    fixed_costs = rng.randint(90 + 1, size=n_facilities) + rng.randint(100, 110 + 1, size=n_facilities)
+    demand = rng.integers(5, 35 + 1, size=n_customers)
+    capacities = rng.integers(10, 160 + 1, size=n_facilities)
+    fixed_costs = rng.integers(90 + 1, size=n_facilities) + rng.integers(100, 110 + 1, size=n_facilities)
     fixed_costs = fixed_costs.astype(int)
 
     total_demand = demand.sum()
@@ -712,7 +716,7 @@ def generate_capfac(n_customers: int, filepath: str, rng: np.random.RandomState,
         file.write("".join([f" y_{j + 1}" for j in range(n_facilities)]))
 
 
-def generate_indsets(rng: np.random.RandomState):
+def generate_indsets(rng: np.random.Generator):
     """Generates independent set problem instances in accordance with our data generation scheme.
 
     This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (500 nodes).
