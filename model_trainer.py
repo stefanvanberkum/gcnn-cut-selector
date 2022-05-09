@@ -13,6 +13,8 @@ import utilities
 from utilities import log
 from utilities_tf import load_batch_gcnn
 
+from model import BaseModel
+
 
 def load_batch_tf(x):
     return tf.py_func(load_batch_gcnn, [x],
@@ -20,35 +22,37 @@ def load_batch_tf(x):
                        tf.float32])
 
 
-def pretrain(model, dataloader):
+def pretrain(model: BaseModel, dataloader: tf.data.Dataset):
+    """Pretrains a model.
+
+    This function pretrains the model layer-by-layer. So on each iteration, all batches are used to pretrain the
+    first available prenorm layer that is still open for updates. Then, this layer is found by calling
+    :func:`model.pretrain_next()`. This also turns off updates for this layer, effectively moving the pretraining
+    loop to the next layer.
+
+    :param model: The model to pretrain.
+    :param dataloader: The dataset to use for pretraining.
+    :return: The number of prenorm layers that have been processed.
     """
-    Pre-normalizes a model (i.e., PreNormLayer layers) over the given samples.
-    Parameters
-    ----------
-    model : model.BaseModel
-        A base model, which may contain some model.PreNormLayer layers.
-    dataloader : tf.data.Dataset
-        Dataset to use for pre-training the model.
-    Return
-    ------
-    number of PreNormLayer layers processed.
-    """
+
     model.pre_train_init()
     i = 0
     while True:
+        # Prtrain the first prenorm layer that is still open for updates.
         for batch in dataloader:
+            # TODO
             c, ei, ev, v, n_cs, n_vs, n_cands, cands, best_cands, cand_scores = batch
             batched_states = (c, ei, ev, v, n_cs, n_vs)
 
-            if not model.pre_train(batched_states, tf.convert_to_tensor(True)):
+            if not model.pretrain(batched_states, tf.convert_to_tensor(True)):
+                # No layer receives any updates anymore.
                 break
 
+        # Find the layer we just pretrained and turn off updating for this layer.
         res = model.pre_train_next()
         if res is None:
+            # We did not train anything, implying that no layers are left and that we are done.
             break
-        else:
-            layer, name = res
-
         i += 1
 
     return i

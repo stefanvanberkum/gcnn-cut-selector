@@ -76,6 +76,19 @@ class SamplingAgent(Cutsel):
         self.rng = np.random.default_rng(seed)
 
     def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
+        """Samples expert (state, action) pairs based on bound improvement.
+
+        Whenever the expert is not queried, the method falls back to hybrid cut selection rule.
+
+        :param cuts: A list of cut candidates.
+        :param forcedcuts: A list of forced cuts, that are not subject to selection.
+        :param root: True if we are at the root node.
+        :param maxnselectedcuts: The maximum number of selected cuts.
+        :return: A dictionary of the form {'cuts': np.array, 'nselectedcuts': int, 'result': SCIP_RESULT},
+            where 'cuts' represent the resorted array of cuts in descending order of cut quality, 'nselectedcuts'
+            represents the number of cuts that should be selected from cuts (the first 'nselectedcuts', and 'result'
+            signals to SCIP that everything worked out.
+        """
 
         query_expert = self.rng.random() < self.p_expert
         if query_expert:
@@ -121,7 +134,7 @@ class SamplingAgent(Cutsel):
                 self.sample_counter += 1
 
         if not query_expert or not uneventful:
-            # Fall back to a hybrid branching rule.
+            # Fall back to a hybrid cut selection rule.
             quality = [self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
                 cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(
                 cut) + 0.5 * self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in cuts]

@@ -1,6 +1,4 @@
-"""This is the main execution environment.
-
-"""
+"""This is the main execution environment."""
 
 from datetime import timedelta
 from math import floor
@@ -9,11 +7,12 @@ from time import time
 
 from numpy.random import default_rng
 
+from data_collector import collect_data
 from instance_generator import generate_instances
 
 
 def main():
-    generate = True
+    generate = False
     collect = True
     train = True
     test = True
@@ -27,6 +26,10 @@ def main():
 
     if generate:
         generate_instances(seeds[0])
+        print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
+
+    if collect:
+        collect_data(n_jobs, seeds[1])
         print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
 
 
