@@ -392,7 +392,7 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ge
     """Generates a combinatorial auction problem instance and writes it to a CPLEX LP file.
 
     This method iteratively generates bids, based on the algorithm described in Section 4.3 of [1]_. First,
-    we generate common resale values for each good from the interval [*min_value, max_value*). Then, we generate
+    we generate common resale values for each good from the interval [*min_value*, *max_value*). Then, we generate
     compatibilities between goods (the prior probability that they appear together in a bundle). Then,
     for each bidder we randomly generate the deviation from the common resale price by multiplying *max_value *
     max_deviation* by the bidder interests that are randomly generated from :math:`U(0, 1)`. Then, an initial bundle

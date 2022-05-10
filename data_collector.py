@@ -86,7 +86,7 @@ class SamplingAgent(Cutsel):
         :param maxnselectedcuts: The maximum number of selected cuts.
         :return: A dictionary of the form {'cuts': np.array, 'nselectedcuts': int, 'result': SCIP_RESULT},
             where 'cuts' represent the resorted array of cuts in descending order of cut quality, 'nselectedcuts'
-            represents the number of cuts that should be selected from cuts (the first 'nselectedcuts', and 'result'
+            represents the number of cuts that should be selected from cuts (the first 'nselectedcuts'), and 'result'
             signals to SCIP that everything worked out.
         """
 
@@ -122,9 +122,9 @@ class SamplingAgent(Cutsel):
                 self.model.endDive()
 
             if uneventful:
-                # Record the state, action, and action set.
+                # Record the (state, action) pair.
                 state = utils.get_state(self.model, cuts)
-                data = [state, quality, cuts]
+                data = [state, quality]
 
                 filename = f'{self.out_dir}/sample_{self.episode}_{self.sample_counter}.pkl'
                 with gzip.open(filename, 'wb') as file:

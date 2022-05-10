@@ -279,6 +279,96 @@ def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_clock=False):
         model.setIntParam('timing/clocktype', 1)
 
 
+def load_batch_gcnn(sample_files):
+    """Load and concatenate samples into one stacked mini-batch, for use in a GCNN model.
+
+    The output is of the form (*cons_feats*, *cons_edge_inds*, *cons_edge_feats*, *var_feats*, *cut_feats*,
+    *cut_edge_inds*, *cut_edge_feats*, *n_cons*, *n_vars*, *n_cuts*, *improvements*), with the following parameters:
+
+    - *cons_feats*: 2D constraint feature tensor of size (sum(*n_cons*), *n_cons_features*).
+    - *cons_edge_inds*: 2D edge index tensor of size (*n_cons_edges*, *n_cons_features*).
+    - *cons_edge_feats*: 2D edge feature tensor of size (*n_cons_edges*, *n_edge_features*).
+    - *var_feats*: 2D variable feature tensor of size (sum(*n_vars*), *n_var_features*).
+    - *cut_feats*: 2D cut candidate feature tensor of size (sum(*n_cuts*), *n_cut_features*).
+    - *cut_edge_inds*: 2D edge index tensor of size (*n_cut_edges*, *n_cut_features*).
+    - *cut_edge_feats*: 2D edge feature tensor of size (*n_cut_edges*, *n_edge_features*).
+    - *n_cons*: 1D tensor that contains the number of constraints for each sample.
+    - *n_vars*: 1D tensor that contains the number of variables for each sample.
+    - *n_cuts*: 1D tensor that contains the number of cut candidates for each sample.
+    - *improvements*: 1D tensor that contains the stacked bound improvement computed by the expert.
+
+    :param sample_files: A list of filepaths to the sample files to be batched together.
+    :return: The concatenated data.
+    """
+
+    cons_feats = []
+    cons_edge_inds = []
+    cons_edge_feats = []
+    var_feats = []
+    cut_feats = []
+    cut_edge_inds = []
+    cut_edge_feats = []
+    improvements = []
+
+    # Load samples.
+    for filename in sample_files:
+        with gzip.open(filename, 'rb') as file:
+            sample = pickle.load(file)
+
+            # Load (state, action) pair.
+            sample_state, sample_improvements = sample['data']
+
+        # Append everything to its corresponding list.
+        sample_cons, sample_cons_edge, sample_var, sample_cut, sample_cut_edge = sample_state
+        cons_feats.append(sample_cons['values'])
+        cons_edge_inds.append(sample_cons_edge['indices'])
+        cons_edge_feats.append(sample_cons_edge['values'])
+        var_feats.append(sample_var['values'])
+        cut_feats.append(sample_cut['values'])
+        cut_edge_inds.append(sample_cut_edge['indices'])
+        cut_edge_feats.append(sample_cut_edge['values'])
+        improvements.append(sample_improvements)
+
+    # Compute the number of each element per sample.
+    n_cons = [c.shape[0] for c in cons_feats]
+    n_vars = [v.shape[0] for v in var_feats]
+    n_cuts = [k.shape[0] for k in cut_feats]
+
+    # Concatenate all the feature matrices.
+    cons_feats = np.concatenate(cons_feats, axis=0)
+    var_feats = np.concatenate(var_feats, axis=0)
+    cut_feats = np.concatenate(cut_feats, axis=0)
+    cons_edge_feats = np.concatenate(cons_edge_feats, axis=0)
+    cut_edge_feats = np.concatenate(cut_edge_feats, axis=0)
+
+    # Concatenate and adjust the edge indices so that nodes in different samples get different indices.
+    # [[0, n_cons_1, n_cons_1 + n_cons_2, ...], [0, n_var_1, n_var_1 + n_var_2, ...]]
+    cons_shift = np.cumsum([[0] + n_cons[:-1], [0] + n_vars[:-1]], axis=1)
+    cons_edge_inds = np.concatenate([e_ind + cons_shift[:, j:(j + 1)] for j, e_ind in enumerate(cons_edge_inds)],
+                                    axis=1)
+    cut_shift = np.cumsum([[0] + n_cuts[:-1], [0] + n_vars[:-1]], axis=1)
+    cut_edge_inds = np.concatenate([e_ind + cut_shift[:, j:(j + 1)] for j, e_ind in enumerate(cut_edge_inds)], axis=1)
+
+    # Concatenate the improvements.
+    improvements = np.concatenate(improvements)
+
+    # Convert everything to tensors.
+    cons_feats = tf.convert_to_tensor(cons_feats, dtype=tf.float32)
+    cons_edge_inds = tf.convert_to_tensor(cons_edge_inds, dtype=tf.int32)
+    cons_edge_feats = tf.convert_to_tensor(cons_edge_feats, dtype=tf.float32)
+    var_feats = tf.convert_to_tensor(var_feats, dtype=tf.float32)
+    cut_feats = tf.convert_to_tensor(cut_feats, dtype=tf.float32)
+    cut_edge_inds = tf.convert_to_tensor(cut_edge_inds, dtype=tf.int32)
+    cut_edge_feats = tf.convert_to_tensor(cut_edge_feats, dtype=tf.float32)
+    n_cons = tf.convert_to_tensor(n_cons, dtype=tf.int32)
+    n_vars = tf.convert_to_tensor(n_vars, dtype=tf.int32)
+    n_cuts = tf.convert_to_tensor(n_cuts, dtype=tf.int32)
+    improvements = tf.convert_to_tensor(improvements, dtype=tf.float32)
+
+    return cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons, \
+           n_vars, n_cuts, improvements
+
+
 def compute_extended_variable_features(state, candidates):
     """
     Utility to extract variable features only from a bipartite state representation.
@@ -425,66 +515,3 @@ def load_flat_samples(filename, feat_type, label_type, augment_feats, normalize_
         raise ValueError(f"Invalid label type: '{label_type}'")
 
     return cand_states, cand_labels, best_cand_idx
-
-
-def load_batch_gcnn(sample_files):
-    """
-    Loads and concatenates a bunch of samples into one mini-batch.
-    """
-    c_features = []
-    e_indices = []
-    e_features = []
-    v_features = []
-    candss = []
-    cand_choices = []
-    cand_scoress = []
-
-    # load samples
-    for filename in sample_files:
-        with gzip.open(filename, 'rb') as f:
-            sample = pickle.load(f)
-
-        sample_state, _, sample_action, sample_cands, cand_scores = sample['data']
-
-        sample_cands = np.array(sample_cands)
-        cand_choice = np.where(sample_cands == sample_action)[0][0]  # action index relative to candidates
-
-        c, e, v = sample_state
-        c_features.append(c['values'])
-        e_indices.append(e['indices'])
-        e_features.append(e['values'])
-        v_features.append(v['values'])
-        candss.append(sample_cands)
-        cand_choices.append(cand_choice)
-        cand_scoress.append(cand_scores)
-
-    n_cs_per_sample = [c.shape[0] for c in c_features]
-    n_vs_per_sample = [v.shape[0] for v in v_features]
-    n_cands_per_sample = [cds.shape[0] for cds in candss]
-
-    # concatenate samples in one big graph
-    c_features = np.concatenate(c_features, axis=0)
-    v_features = np.concatenate(v_features, axis=0)
-    e_features = np.concatenate(e_features, axis=0)
-    # edge indices have to be adjusted accordingly
-    cv_shift = np.cumsum([[0] + n_cs_per_sample[:-1], [0] + n_vs_per_sample[:-1]], axis=1)
-    e_indices = np.concatenate([e_ind + cv_shift[:, j:(j + 1)] for j, e_ind in enumerate(e_indices)], axis=1)
-    # candidate indices as well
-    candss = np.concatenate([cands + shift for cands, shift in zip(candss, cv_shift[1])])
-    cand_choices = np.array(cand_choices)
-    cand_scoress = np.concatenate(cand_scoress, axis=0)
-
-    # convert to tensors
-    c_features = tf.convert_to_tensor(c_features, dtype=tf.float32)
-    e_indices = tf.convert_to_tensor(e_indices, dtype=tf.int32)
-    e_features = tf.convert_to_tensor(e_features, dtype=tf.float32)
-    v_features = tf.convert_to_tensor(v_features, dtype=tf.float32)
-    n_cs_per_sample = tf.convert_to_tensor(n_cs_per_sample, dtype=tf.int32)
-    n_vs_per_sample = tf.convert_to_tensor(n_vs_per_sample, dtype=tf.int32)
-    candss = tf.convert_to_tensor(candss, dtype=tf.int32)
-    cand_choices = tf.convert_to_tensor(cand_choices, dtype=tf.int32)
-    cand_scoress = tf.convert_to_tensor(cand_scoress, dtype=tf.float32)
-    n_cands_per_sample = tf.convert_to_tensor(n_cands_per_sample, dtype=tf.int32)
-
-    return c_features, e_indices, e_features, v_features, n_cs_per_sample, n_vs_per_sample, n_cands_per_sample, \
-           candss, cand_choices,

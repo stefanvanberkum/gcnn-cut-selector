@@ -17,9 +17,9 @@ from model import BaseModel
 
 
 def load_batch_tf(x):
-    return tf.py_func(load_batch_gcnn, [x],
-                      [tf.float32, tf.int32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32, tf.int32,
-                       tf.float32])
+    return tf.numpy_function(load_batch_gcnn, [x],
+                             [tf.float32, tf.int32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32,
+                              tf.int32, tf.float32])
 
 
 def pretrain(model: BaseModel, dataloader: tf.data.Dataset):
@@ -40,9 +40,10 @@ def pretrain(model: BaseModel, dataloader: tf.data.Dataset):
     while True:
         # Prtrain the first prenorm layer that is still open for updates.
         for batch in dataloader:
-            # TODO
-            c, ei, ev, v, n_cs, n_vs, n_cands, cands, best_cands, cand_scores = batch
-            batched_states = (c, ei, ev, v, n_cs, n_vs)
+            (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
+             n_vars, n_cuts, _) = batch
+            batched_states = cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, \
+                             cut_edge_feats, n_cons, n_vars, n_cuts
 
             if not model.pretrain(batched_states, tf.convert_to_tensor(True)):
                 # No layer receives any updates anymore.
@@ -64,7 +65,8 @@ def process(model, dataloader, top_k, optimizer=None):
 
     n_samples_processed = 0
     for batch in dataloader:
-        c, ei, ev, v, n_cs, n_vs, n_cands, cands, best_cands, cand_scores = batch
+        (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
+         n_vars, n_cuts, improvements) = batch
         batched_states = (
             c, ei, ev, v, tf.reduce_sum(n_cs, keepdims=True), tf.reduce_sum(n_vs, keepdims=True))  # prevent padding
         batch_size = len(n_cs.numpy())
@@ -87,6 +89,8 @@ def process(model, dataloader, top_k, optimizer=None):
         true_bestscore = tf.reduce_max(true_scores, axis=-1, keepdims=True)
         true_scores = true_scores.numpy()
         true_bestscore = true_bestscore.numpy()
+
+        # Measure how often it ranks the highest-quality cuts correctly (10%, 25%, 50%?)
 
         kacc = []
         for k in top_k:

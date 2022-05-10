@@ -1,10 +1,30 @@
+"""This module contains the framework for the graph convolutional neural network model (GCNN).
+
+Summary
+=======
+This module provides the framework for the GCNN used for cut selection. The methods in this module are based on [1]_.
+
+Classes
+========
+- :class:`BaseModel`: A base model framework, which implements save, restore, and pretraining methods.
+- :class:`GCNN`: The graph convolutional neural network (GCNN) model.
+- :class:`PreNormLayer`: A pre-normalization layer, used to normalize an input layer to zero mean and unit variance.
+- :class:`PreNormException`: Exception used for pretraining.
+- :class:`PartialGraphConvolution`: A partial bipartite graph convolution.
+
+References
+==========
+.. [1] Gasse, M., Chételat, D., Ferroni, N., Charlin, L., & Lodi, A. (2019). Exact combinatorial optimization with
+    graph convolutional neural networks. *Neural Information Processing Systems (NeurIPS 2019)*, 15580–15592.
+    https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
+"""
+
 import pickle
 
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Model, Sequential
-from tensorflow.keras.activations import relu
-from tensorflow.keras.initializers import constant, orthogonal
+from tensorflow.keras.initializers import constant
 from tensorflow.keras.layers import Activation, Dense, Layer
 
 
@@ -152,33 +172,37 @@ class GCNN(BaseModel):
 
         # Constraint embedding.
         self.cons_embedding = Sequential([PreNormLayer(n_units=self.cons_feats),
-                                          Dense(units=self.emb_size, activation=relu, kernel_initializer=orthogonal),
-                                          Dense(units=self.emb_size, activation=relu, kernel_initializer=orthogonal)])
+                                          Dense(units=self.emb_size, activation='relu',
+                                                kernel_initializer='orthogonal'),
+                                          Dense(units=self.emb_size, activation='relu',
+                                                kernel_initializer='orthogonal')])
 
         # Constraint edge embedding.
         self.cons_edge_embedding = Sequential([PreNormLayer(self.edge_feats)])
 
         # Variable embedding.
         self.var_embedding = Sequential([PreNormLayer(n_units=self.var_feats),
-                                         Dense(units=self.emb_size, activation=relu, kernel_initializer=orthogonal),
-                                         Dense(units=self.emb_size, activation=relu, kernel_initializer=orthogonal)])
+                                         Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
+                                         Dense(units=self.emb_size, activation='relu',
+                                               kernel_initializer='orthogonal')])
 
         # Cut candidate embedding.
         self.cut_embedding = Sequential([PreNormLayer(n_units=self.cut_feats),
-                                         Dense(units=self.emb_size, activation=relu, kernel_initializer=orthogonal),
-                                         Dense(units=self.emb_size, activation=relu, kernel_initializer=orthogonal)])
+                                         Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
+                                         Dense(units=self.emb_size, activation='relu',
+                                               kernel_initializer='orthogonal')])
 
         # Cut edge embedding.
         self.cut_edge_embedding = Sequential([PreNormLayer(self.edge_feats)])
 
         # Graph convolutions.
-        self.conv_v_to_c = PartialGraphConvolution(self.emb_size, relu, orthogonal, from_v=True)
-        self.conv_c_to_v = PartialGraphConvolution(self.emb_size, relu, orthogonal)
-        self.conv_v_to_k = PartialGraphConvolution(self.emb_size, relu, orthogonal, from_v=True)
+        self.conv_v_to_c = PartialGraphConvolution(self.emb_size, from_v=True)
+        self.conv_c_to_v = PartialGraphConvolution(self.emb_size)
+        self.conv_v_to_k = PartialGraphConvolution(self.emb_size, from_v=True)
 
         # Output.
-        self.output_module = Sequential([Dense(units=self.emb_size, activation=relu, kernel_initializer=orthogonal),
-                                         Dense(units=1, activation=None, kernel_initializer=orthogonal,
+        self.output_module = Sequential([Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
+                                         Dense(units=1, activation='relu', kernel_initializer='orthogonal',
                                                use_bias=False)])
 
         # Build the model right away.
@@ -201,8 +225,15 @@ class GCNN(BaseModel):
     def build(self, input_shapes: list):
         """Builds the model.
 
-        :param input_shapes: The input shapes to use for building the model, array of the from [c_shape, ei_shape,
-        e_shape, v_shape, k_shape].
+        Input is of the form [*c_shape*, *ei_shape*, *e_shape*, *v_shape*, *k_shape*], with the following parameters:
+
+        - *c_shape*: The shape of the constraint feature matrix.
+        - *ei_shape*: The shape of the edge index matrix.
+        - *e_shape*: The shape of the edge feature matrix.
+        - *v_shape*: The shape of the variable feature matrix.
+        - *k_shape*: The shape of the cut feature matrix.
+
+        :param input_shapes: The input shapes to use for building the model.
         """
 
         c_shape, ei_shape, e_shape, v_shape, k_shape = input_shapes
@@ -220,38 +251,37 @@ class GCNN(BaseModel):
             self.output_module.build(emb_shape)
             self.built = True
 
-    def call(self, inputs, training):
+    def call(self, inputs, training: bool):
         """Calls the model using the specified input.
 
         Accepts stacked mini-batches, in which case the number of candidate cuts per sample has to be provided,
-        and the output consists of a padded dense tensor.
+        and the output consists of a padded tensor of size (*n_samples*, *max_cuts*).
 
-        Input is of the form [*cons_feats, cons_edge_inds,
-        cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons, n_vars, n_cuts*],
-        with the following parameters:
+        Input is of the form [*cons_feats*, *cons_edge_inds*, *cons_edge_feats*, *var_feats*, *cut_feats*,
+        *cut_edge_inds*, *cut_edge_feats*, *n_cons*, *n_vars*, *n_cuts*], with the following parameters:
 
-        - *cons_feats*: 2D constraint feature tensor of size (*n_cons, n_cons_features*).
-        - *cons_edge_inds*: 2D edge index tensor of size (*n_cons_edges, n_cons_features*).
-        - *cons_edge_feats*: 2D edge feature tensor of size (*n_cons_edges, n_edge_features*).
-        - *var_feats*: 2D variable feature tensor of size (*n_vars, n_var_features*).
-        - *cut_feats*: 2D cut candidate feature tensor of size (*n_cuts, n_cut_features*).
-        - *cut_edge_inds*: 2D edge index tensor of size (*n_cut_edges, n_cut_features*).
-        - *cut_edge_feats*: 2D edge feature tensor of size (*n_cut_edges, n_edge_features*).
+        - *cons_feats*: 2D constraint feature tensor of size (sum(*n_cons*), *n_cons_features*).
+        - *cons_edge_inds*: 2D edge index tensor of size (*n_cons_edges*, *n_cons_features*).
+        - *cons_edge_feats*: 2D edge feature tensor of size (*n_cons_edges*, *n_edge_features*).
+        - *var_feats*: 2D variable feature tensor of size (sum(*n_vars*), *n_var_features*).
+        - *cut_feats*: 2D cut candidate feature tensor of size (sum(*n_cuts*), *n_cut_features*).
+        - *cut_edge_inds*: 2D edge index tensor of size (*n_cut_edges*, *n_cut_features*).
+        - *cut_edge_feats*: 2D edge feature tensor of size (*n_cut_edges*, *n_edge_features*).
         - *n_cons*: 1D tensor that contains the number of constraints for each sample.
         - *n_vars*: 1D tensor that contains the number of variables for each sample.
         - *n_cuts*: 1D tensor that contains the number of cut candidates for each sample.
 
-        :param inputs: A list of input tensors.
+        :param inputs: The model input.
         :param training: True if in training mode.
-        :return: The model output, a vector in case of a single sample, a padded dense tensor in case of a stacked
-            mini-batch.
+        :return: The model output, a vector in case of a single sample, a padded tensor of size (*n_samples,
+            max_cuts*) in case of a stacked mini-batch.
         """
 
-        cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons, \
-        n_vars, n_cuts = inputs
+        (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
+         n_vars, n_cuts) = inputs
         n_cons_total = tf.reduce_sum(n_cons)
         n_vars_total = tf.reduce_sum(n_vars)
-        n_cuts_total = tf.reduce_sum(n_cons)
+        n_cuts_total = tf.reduce_sum(n_cuts)
 
         # Embeddings.
         cons_feats = self.cons_embedding(cons_feats)
@@ -262,39 +292,31 @@ class GCNN(BaseModel):
 
         # Partial graph convolutions.
         cons_feats = self.conv_v_to_c((cons_feats, cons_edge_inds, cons_edge_feats, var_feats, n_cons_total), training)
-        cons_feats = relu(cons_feats)
-
         var_feats = self.conv_c_to_v((cons_feats, cons_edge_inds, cons_edge_feats, var_feats, n_vars_total), training)
-        var_feats = relu(var_feats)
-
         cut_feats = self.conv_v_to_k((cut_feats, cut_edge_inds, cut_edge_feats, var_feats, n_cuts_total), training)
-        cut_feats = relu(cut_feats)
 
         # Output.
         output = self.output_module(cut_feats)
         output = tf.reshape(output, [1, -1])
 
+        # Split and pad the output if there are multiple samples.
         if n_cuts.shape[0] > 1:
             output = self.pad_output(output, n_cuts)
 
         return output
 
     @staticmethod
-    def pad_output(output, n_vars, pad_value=-1e8):
-        """Splits the output by sample and pads with very low logits.
+    def pad_output(output, n_cuts: int):
+        """Splits the output by sample and pads with zeros.
 
-        :param output:
-        :param n_vars:
-        :param pad_value:
-        :return:
+        :param output: An output tensors of size (1, sum(*n_cuts*)).
+        :param n_cuts: The number of cut candidates in each sample.
+        :return: A padded tensor of size (*n_samples, max_cuts*).
         """
-        n_vars_max = tf.reduce_max(n_vars_per_sample)
 
-        output = tf.split(value=output, num_or_size_splits=n_vars_per_sample, axis=1, )
-        output = tf.concat(
-            [tf.pad(x, paddings=[[0, 0], [0, n_vars_max - tf.shape(x)[1]]], mode='CONSTANT', constant_values=pad_value)
-             for x in output], axis=0)
-
+        n_cuts_max = tf.reduce_max(n_cuts)
+        output = tf.split(value=output, num_or_size_splits=n_cuts, axis=1)
+        output = tf.concat([tf.pad(x, paddings=[[0, 0], [0, n_cuts_max - tf.shape(x)[1]]]) for x in output], axis=0)
         return output
 
 
@@ -311,7 +333,7 @@ class PreNormLayer(Layer):
     - :meth:`call`: The layer's call function.
     - :meth:`start_updates`: Initialize the pretraining phase.
     - :meth:`update_params`: Update parameters in pretraining.
-    - :meth:`stop_updates`: End pretraining and fix the layers's parameters.
+    - :meth:`stop_updates`: End pretraining and fix the layer's parameters.
 
     :ivar shift: The shifting weights.
     :ivar scale: Tha scaling weights.
@@ -324,7 +346,7 @@ class PreNormLayer(Layer):
     :ivar count: The current number of samples, used for pretraining.
     """
 
-    def __init__(self, n_units, shift=True, scale=True):
+    def __init__(self, n_units: int, shift=True, scale=True):
         super().__init__()
 
         if shift:
@@ -358,24 +380,24 @@ class PreNormLayer(Layer):
 
         self.built = True
 
-    def call(self, input, *args, **kwargs):
+    def call(self, inputs, *args, **kwargs):
         """The layer's call function.
 
-        :param input: An input tensor.
+        :param inputs: An input tensor.
         :return: The shifted and/or scaled input.
         """
 
         if self.waiting_updates:
-            self.update_params(input)
+            self.update_params(inputs)
             self.received_updates = True
             raise PreNormException
 
         if self.shift is not None:
-            input += self.shift
+            inputs += self.shift
 
         if self.scale is not None:
-            input *= self.scale
-        return input
+            inputs *= self.scale
+        return inputs
 
     def start_updates(self):
         """Initialize the pretraining phase."""
@@ -387,7 +409,7 @@ class PreNormLayer(Layer):
         self.waiting_updates = True
         self.received_updates = False
 
-    def update_params(self, input):
+    def update_params(self, inputs):
         """Update parameters in pretraining.
 
         Uses an online mean and variance estimation algorithm suggested by [1]_,
@@ -399,17 +421,17 @@ class PreNormLayer(Layer):
         .. [1] Chan, T. F., Golub, G. H., & LeVeque, R. J. (1982). Updating formulae and a pairwise algorithm for
             computing sample variances. COMPSTAT, 30–41. https://doi.org/10.1007/978-3-642-51461-6_3
 
-        :param input: An input tensor.
+        :param inputs: An input tensor.
         """
 
-        assert self.n_units == 1 or input.shape[
-            -1] == self.n_units, f"Expected input dimension of size {self.n_units}, got {input.shape[-1]}."
+        assert self.n_units == 1 or inputs.shape[
+            -1] == self.n_units, f"Expected input dimension of size {self.n_units}, got {inputs.shape[-1]}."
 
         # Compute sample mean and variance.
-        input = tf.reshape(input, [-1, self.n_units])
-        sample_mean = tf.reduce_mean(input, 0)
-        sample_var = tf.reduce_mean((input - sample_mean) ** 2, axis=0)
-        sample_count = tf.cast(tf.size(input=input) / self.n_units, tf.float32)
+        inputs = tf.reshape(inputs, [-1, self.n_units])
+        sample_mean = tf.reduce_mean(inputs, 0)
+        sample_var = tf.reduce_mean((inputs - sample_mean) ** 2, axis=0)
+        sample_count = tf.cast(tf.size(input=inputs) / self.n_units, tf.float32)
 
         # Update the sum of squared differences from the current mean (m2).
         delta = sample_mean - self.mean
@@ -422,7 +444,7 @@ class PreNormLayer(Layer):
         self.var = self.m2 / self.count if self.count > 0 else 1
 
     def stop_updates(self):
-        """End pretraining and fix the layers's parameters."""
+        """End pretraining and fix the layer's parameters."""
 
         if self.shift is not None:
             self.shift.assign(-self.mean)
@@ -443,88 +465,127 @@ class PreNormException(Exception):
 
 
 class PartialGraphConvolution(Model):
-    """
-    Partial bipartite graph convolution (either left-to-right or right-to-left).
+    """A partial bipartite graph convolution.
+
+    Extends TensorFlow's Model class. The left/right terminology adopted in this class is based on the bipartite
+    graph representation of a combinatorial optimization problem, with rows (constraints and cuts) on the left-hand
+    side, and columns (variables) on the right-hand side. In this graph representation, rows and columns have an edge
+    between them if the corresponding variable appears in the row or cut.
+
+    The partial graph convolution operates on a set of rows, a set of variables, and a set of edges between the two.
+    For each edge, the algorithm first computes a joint feature representation by passing all feature vectors -
+    sending node, edge, and receiving node - through a 64-node layer without activation (basically a weighted sum).
+    This joint feature representation is then scaled, passed through a ReLU activation, and passed through another
+    64-node layer without activation. Then, for the receiving side, this joint feature representation is added to the
+    feature representation of the corresponding node. The final, feature representation is scaled, concatenated with
+    the initial receiving feature matrix. Finally, this result is passed through two 64-node layers with ReLU
+    activation.
+
+    Methods
+    =======
+    - :meth:`build`: Builds the model.
+    - :meth:`call`: Calls the model on inputs and returns outputs.
+
+    :ivar emb_size: The embedding size of each feature vector.
+    :ivar from_v: True if the message is passed from the variables to either the constraints or cut candidates.
+    :ivar feature_module_left: A 64-node layer, which applies a weighted sum with bias to the input.
+    :ivar feature_module_edge: A 64-node layer, which applies a weighted sum to the input.
+    :ivar feature_module_right: A 64-node layer, which applies a weighted sum to the input.
+    :ivar feature_module_final: A scaling operation and ReLU activation, followed by a 64-node layer which applies a
+        weighted sum to the input.
+    :ivar post_conv_module: A scaling operation.
+    :ivar output_module: Two 64-node layers with ReLU activation.
     """
 
-    def __init__(self, emb_size, activation, initializer, from_v=False):
+    def __init__(self, emb_size: int, from_v=False):
         super().__init__()
         self.emb_size = emb_size
-        self.activation = activation
-        self.initializer = initializer
         self.from_v = from_v
 
-        # feature layers
+        # Feature modules (essentially weighted sums).
         self.feature_module_left = Sequential(
-            [Dense(units=self.emb_size, activation=None, use_bias=True, kernel_initializer=self.initializer)])
+            [Dense(units=self.emb_size, activation=None, use_bias=True, kernel_initializer='orthogonal')])
+
         self.feature_module_edge = Sequential(
-            [Dense(units=self.emb_size, activation=None, use_bias=False, kernel_initializer=self.initializer)])
+            [Dense(units=self.emb_size, activation=None, use_bias=False, kernel_initializer='orthogonal')])
+
         self.feature_module_right = Sequential(
-            [Dense(units=self.emb_size, activation=None, use_bias=False, kernel_initializer=self.initializer)])
-        self.feature_module_final = Sequential([PreNormLayer(1, shift=False),  # normalize after summation trick
-                                                Activation(self.activation), Dense(units=self.emb_size, activation=None,
-                                                                                   kernel_initializer=self.initializer)])
+            [Dense(units=self.emb_size, activation=None, use_bias=False, kernel_initializer='orthogonal')])
 
-        self.post_conv_module = Sequential([PreNormLayer(1, shift=False),  # normalize after convolution
-                                            ])
+        self.feature_module_final = Sequential([PreNormLayer(1, shift=False), Activation('relu'),
+                                                Dense(units=self.emb_size, activation=None,
+                                                      kernel_initializer='orthogonal')])
 
-        # output_layers
-        self.output_module = Sequential(
-            [Dense(units=self.emb_size, activation=None, kernel_initializer=self.initializer),
-             Activation(self.activation),
-             Dense(units=self.emb_size, activation=None, kernel_initializer=self.initializer), ])
+        # Scaling operation.
+        self.post_conv_module = Sequential([PreNormLayer(1, shift=False)])
+
+        # Output layer.
+        self.output_module = Sequential([Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
+                                         Dense(units=self.emb_size, activation='relu',
+                                               kernel_initializer='orthogonal')])
 
     def build(self, input_shapes):
-        l_shape, ei_shape, ev_shape, r_shape = input_shapes
+        """Builds the model.
+
+        Input is of the form [*l_shape*, *ei_shape*, *e_shape, *v_shape*], with the following parameters:
+
+        - *l_shape*: The shape of the constraint or cut feature matrix.
+        - *ei_shape*: The shape of the edge index matrix.
+        - *e_shape*: The shape of the edge feature matrix.
+        - *v_shape*: The shape of the variable feature matrix.
+
+        :param input_shapes: The input shapes to use for building the model.
+        """
+
+        l_shape, ei_shape, ev_shape, v_shape = input_shapes
 
         self.feature_module_left.build(l_shape)
         self.feature_module_edge.build(ev_shape)
-        self.feature_module_right.build(r_shape)
+        self.feature_module_right.build(v_shape)
         self.feature_module_final.build([None, self.emb_size])
         self.post_conv_module.build([None, self.emb_size])
-        self.output_module.build([None, self.emb_size + (l_shape[1] if self.from_v else r_shape[1])])
+        self.output_module.build([None, self.emb_size + (l_shape[1] if self.from_v else v_shape[1])])
         self.built = True
 
-    def call(self, inputs, training):
+    def call(self, inputs, training: bool):
+        """Calls the model using the specified input, and performs a partial graph convolution.
+
+        Input is of the form [*left_features*, *edge_features*, *edge_features*, *right_features*, *out_size*],
+        with the following parameters:
+
+        - *l_shape*: The shape of the constraint or cut feature matrix.
+        - *ei_shape*: The shape of the edge index matrix.
+        - *e_shape*: The shape of the edge feature matrix.
+        - *v_shape*: The shape of the variable feature matrix.
+
+        :param inputs: The convolution input.
+        :param training: True if in training mode.
+        :return: The convolution output, of shape (*n_left*, *emb_size*) if *self.from_v* is true, (*n_vars,
+            *emb_size*) otherwise.
         """
-        Perfoms a partial graph convolution on the given bipartite graph.
-        Inputs
-        ------
-        left_features: 2D float tensor
-            Features of the left-hand-side nodes in the bipartite graph
-        edge_indices: 2D int tensor
-            Edge indices in left-right order
-        edge_features: 2D float tensor
-            Features of the edges
-        right_features: 2D float tensor
-            Features of the right-hand-side nodes in the bipartite graph
-        scatter_out_size: 1D int tensor
-            Output size (left_features.shape[0] or right_features.shape[0], unknown at compile time)
-        Other parameters
-        ----------------
-        training: boolean
-            Training mode indicator
-        """
-        left_features, edge_indices, edge_features, right_features, scatter_out_size = inputs
+
+        left_feats, edge_inds, edge_feats, var_feats, out_size = inputs
 
         if self.from_v:
-            scatter_dim = 0
-            prev_features = left_features
+            # The message-receiving side is the left-hand side of the bipartite graph.
+            receiving_side = 0
+            receiving_feats = left_feats
         else:
-            scatter_dim = 1
-            prev_features = right_features
+            # The message-receiving side is the right-hand side of the bipartite graph.
+            receiving_side = 1
+            receiving_feats = var_feats
 
-        # compute joint features
-        joint_features = self.feature_module_final(tf.gather(self.feature_module_left(left_features), axis=0,
-                                                             indices=edge_indices[0]) + self.feature_module_edge(
-            edge_features) + tf.gather(self.feature_module_right(right_features), axis=0, indices=edge_indices[1]))
+        # Compute a joint feature representation for each edge.
+        joint_features = self.feature_module_final(
+            tf.gather(self.feature_module_left(left_feats), axis=0, indices=edge_inds[0]) + self.feature_module_edge(
+                edge_feats) + tf.gather(self.feature_module_right(var_feats), axis=0, indices=edge_inds[1]))
 
-        # perform convolution
-        conv_output = tf.scatter_nd(updates=joint_features, indices=tf.expand_dims(edge_indices[scatter_dim], axis=1),
-                                    shape=[scatter_out_size, self.emb_size])
+        # Allocate the joint feature representation of an edge to the corresponding receiving node.
+        conv_output = tf.scatter_nd(updates=joint_features, indices=tf.expand_dims(edge_inds[receiving_side], axis=1),
+                                    shape=[out_size, self.emb_size])
         conv_output = self.post_conv_module(conv_output)
 
-        # apply final module
-        output = self.output_module(tf.concat([conv_output, prev_features, ], axis=1))
+        # Concatenate and pass through the output module.
+        output = self.output_module(tf.concat([conv_output, receiving_feats], axis=1))
 
         return output
