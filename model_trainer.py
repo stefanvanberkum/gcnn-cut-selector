@@ -11,15 +11,9 @@ import tensorflow as tf
 import tensorflow.contrib.eager as tfe
 import utilities
 from utilities import log
-from utilities_tf import load_batch_gcnn
 
 from model import BaseModel
-
-
-def load_batch_tf(x):
-    return tf.numpy_function(load_batch_gcnn, [x],
-                             [tf.float32, tf.int32, tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.int32,
-                              tf.int32, tf.float32])
+from utils import load_batch_tf
 
 
 def pretrain(model: BaseModel, dataloader: tf.data.Dataset):
@@ -63,7 +57,7 @@ def process(model, dataloader, top_k, optimizer=None):
     mean_loss = 0
     mean_kacc = np.zeros(len(top_k))
 
-    n_samples_processed = 0
+    n_samples = 0
     for batch in dataloader:
         (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
          n_vars, n_cuts, improvements) = batch
@@ -101,10 +95,10 @@ def process(model, dataloader, top_k, optimizer=None):
 
         mean_loss += loss.numpy() * batch_size
         mean_kacc += kacc * batch_size
-        n_samples_processed += batch_size
+        n_samples += batch_size
 
-    mean_loss /= n_samples_processed
-    mean_kacc /= n_samples_processed
+    mean_loss /= n_samples
+    mean_kacc /= n_samples
 
     return mean_loss, mean_kacc
 

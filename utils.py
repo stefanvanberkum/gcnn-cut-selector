@@ -67,7 +67,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     n_cols = len(cols)
     n_cuts = len(cuts)
 
-    # Row (constraint) features.
+    # ROW (CONSTRAINT) FEATURES.
     row_feats = {}
 
     # Compute the norm of each constraint.
@@ -102,7 +102,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     row_feat_vals = np.concatenate(list(row_feats.values()), axis=-1)
     row_feats = {'features': row_feat_names, 'values': row_feat_vals}
 
-    # Constraint edge features.
+    # CONSTRAINT EDGE FEATURES.
     # For each row, record a vector [value / row_norm, row_index, column_index] and stack everything into one big
     # matrix (-1x3).
     data = np.array([[rows[i].getVals()[j] / row_norms[i], rows[i].getLPPos(), rows[i].getCols()[j].getLPPos()] for i in
@@ -121,7 +121,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     edge_feat_vals = np.concatenate(list(edge_feats.values()), axis=-1)
     row_edge_feats = {'features': edge_feat_names, 'indices': edge_feat_indices, 'values': edge_feat_vals}
 
-    # Column (variable) features.
+    # COLUMN (VARIABLE) FEATURES.
     col_feats = {}
 
     # Retrieve column type.
@@ -168,7 +168,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
 
     col_feats = {'features': col_feat_names, 'values': col_feat_vals}
 
-    # Cut candidate features.
+    # CUT CANDIDATE FEATURES.
     cut_feats = {}
 
     # Compute the norm of each cut candidate.
@@ -213,7 +213,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     cut_feat_vals = np.concatenate(list(cut_feats.values()), axis=-1)
     cut_feats = {'features': cut_feat_names, 'values': cut_feat_vals}
 
-    # Cut edge features.
+    # CUT EDGE FEATURES.
     # For each cut, record a vector [value / cut_norm, cut_index, column_index] and stack everything into one big
     # matrix (-1x3).
     data = np.array(
@@ -279,7 +279,21 @@ def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_clock=False):
         model.setIntParam('timing/clocktype', 1)
 
 
-def load_batch_gcnn(sample_files):
+def load_batch_tf(x):
+    """Loads a batch of samples, following :func:`load_batch`.
+
+    See :func:`load_batch` for further documentation.
+
+    :param x: The input to be passed to the function.
+    :return: The output tensors.
+    """
+
+    return tf.numpy_function(load_batch, [x],
+                             [tf.float32, tf.int32, tf.float32, tf.float32, tf.float32, tf.int32, tf.float32, tf.int32,
+                              tf.int32, tf.int32, tf.float32])
+
+
+def load_batch(sample_files):
     """Load and concatenate samples into one stacked mini-batch, for use in a GCNN model.
 
     The output is of the form (*cons_feats*, *cons_edge_inds*, *cons_edge_feats*, *var_feats*, *cut_feats*,
