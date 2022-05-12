@@ -34,14 +34,6 @@ import scipy.sparse as sp
 import tensorflow as tf
 
 
-def log(str, logfile=None):
-    str = f'[{datetime.datetime.now()}] {str}'
-    print(str)
-    if logfile is not None:
-        with open(logfile, mode='a') as f:
-            print(str, file=f)
-
-
 def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     """Extracts the graph representation of the problem at the current solver state.
 
@@ -381,6 +373,19 @@ def load_batch(sample_files):
 
     return cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons, \
            n_vars, n_cuts, improvements
+
+
+def write_log(text, logfile):
+    """Writes the specified text to a log file
+
+    :param text: The text to be logged.
+    :param logfile: The path to the log file.
+    """
+
+    text = f'[{datetime.datetime.now()}] {text}'
+    if logfile is not None:
+        with open(logfile, mode='a') as file:
+            print(text, file=file)
 
 
 def compute_extended_variable_features(state, candidates):
