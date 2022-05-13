@@ -202,8 +202,7 @@ class GCNN(BaseModel):
 
         # Output.
         self.output_module = Sequential([Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
-                                         Dense(units=1, activation='relu', kernel_initializer='orthogonal',
-                                               use_bias=False)])
+                                         Dense(units=1, activation='relu', kernel_initializer='orthogonal')])
 
         # Build the model right away.
         self.build([(None, self.cons_feats), (2, None), (None, self.edge_feats), (None, self.var_feats),
@@ -260,20 +259,20 @@ class GCNN(BaseModel):
         Input is of the form [*cons_feats*, *cons_edge_inds*, *cons_edge_feats*, *var_feats*, *cut_feats*,
         *cut_edge_inds*, *cut_edge_feats*, *n_cons*, *n_vars*, *n_cuts*], with the following parameters:
 
-        - *cons_feats*: 2D constraint feature tensor of size (sum(*n_cons*), *n_cons_features*).
-        - *cons_edge_inds*: 2D edge index tensor of size (*n_cons_edges*, *n_cons_features*).
-        - *cons_edge_feats*: 2D edge feature tensor of size (*n_cons_edges*, *n_edge_features*).
-        - *var_feats*: 2D variable feature tensor of size (sum(*n_vars*), *n_var_features*).
-        - *cut_feats*: 2D cut candidate feature tensor of size (sum(*n_cuts*), *n_cut_features*).
-        - *cut_edge_inds*: 2D edge index tensor of size (*n_cut_edges*, *n_cut_features*).
-        - *cut_edge_feats*: 2D edge feature tensor of size (*n_cut_edges*, *n_edge_features*).
+        - *cons_feats*: 2D constraint feature tensor of shape (sum(*n_cons*), *n_cons_features*).
+        - *cons_edge_inds*: 2D edge index tensor of shape (2, *n_cons_edges*).
+        - *cons_edge_feats*: 2D edge feature tensor of shape (*n_cons_edges*, *n_edge_features*).
+        - *var_feats*: 2D variable feature tensor of shape (sum(*n_vars*), *n_var_features*).
+        - *cut_feats*: 2D cut candidate feature tensor of shape (sum(*n_cuts*), *n_cut_features*).
+        - *cut_edge_inds*: 2D edge index tensor of shape (2, *n_cut_edges*).
+        - *cut_edge_feats*: 2D edge feature tensor of shape (*n_cut_edges*, *n_edge_features*).
         - *n_cons*: 1D tensor that contains the number of constraints for each sample.
         - *n_vars*: 1D tensor that contains the number of variables for each sample.
         - *n_cuts*: 1D tensor that contains the number of cut candidates for each sample.
 
         :param inputs: The model input.
         :param training: True if in training mode.
-        :return: The model output, a vector in case of a single sample, a padded tensor of size (*n_samples,
+        :return: The model output, a vector in case of a single sample, a padded tensor of shape (*n_samples,
             max_cuts*) in case of a stacked mini-batch.
         """
 
@@ -309,9 +308,9 @@ class GCNN(BaseModel):
     def pad_output(output, n_cuts: int):
         """Splits the output by sample and pads with zeros.
 
-        :param output: An output tensors of size (1, sum(*n_cuts*)).
+        :param output: An output tensors of shape (1, sum(*n_cuts*)).
         :param n_cuts: The number of cut candidates in each sample.
-        :return: A padded tensor of size (*n_samples, max_cuts*).
+        :return: A padded tensor of shape (*n_samples, max_cuts*).
         """
 
         n_cuts_max = tf.reduce_max(n_cuts)
@@ -537,10 +536,10 @@ class PartialGraphConvolution(Model):
         :param input_shapes: The input shapes to use for building the model.
         """
 
-        l_shape, ei_shape, ev_shape, v_shape = input_shapes
+        l_shape, ei_shape, e_shape, v_shape = input_shapes
 
         self.feature_module_left.build(l_shape)
-        self.feature_module_edge.build(ev_shape)
+        self.feature_module_edge.build(e_shape)
         self.feature_module_right.build(v_shape)
         self.feature_module_final.build([None, self.emb_size])
         self.post_conv_module.build([None, self.emb_size])
@@ -550,13 +549,14 @@ class PartialGraphConvolution(Model):
     def call(self, inputs, training: bool):
         """Calls the model using the specified input, and performs a partial graph convolution.
 
-        Input is of the form [*left_features*, *edge_features*, *edge_features*, *right_features*, *out_size*],
+        Input is of the form [*left_features*, *edge_indices*, *edge_features*, *variable_features*, *out_size*],
         with the following parameters:
 
-        - *l_shape*: The shape of the constraint or cut feature matrix.
-        - *ei_shape*: The shape of the edge index matrix.
-        - *e_shape*: The shape of the edge feature matrix.
-        - *v_shape*: The shape of the variable feature matrix.
+        - *left_features*: A 2D constraint or cut feature tensor of shape (*n_left*, *n_features*).
+        - *edge_indices*: A 2D edge index tensor of shape (2, *n_edges*).
+        - *edge_features*: A 2D edge feature tensor of shape (*n_edges*, *n_edge_features*).
+        - *variable_features*: A 2D variable feature tensor of shape (*n_variables*, *n_var_features*).
+        - *out_size*: The size of the output (either *n_left* or *n_vars*).
 
         :param inputs: The convolution input.
         :param training: True if in training mode.
