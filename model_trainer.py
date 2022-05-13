@@ -3,6 +3,7 @@ import pathlib
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.optimizers import Adam
 
 from model import GCNN
@@ -31,7 +32,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     :param early_stopping: The number of epochs without improvement required before early stopping is triggered.
     """
 
-    fractions = [0.25, 0.5, 0.75, 1]
+    fractions = np.array([0.25, 0.5, 0.75, 1])
 
     problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c',
                        'indset': 'indset/500n', }
@@ -85,6 +86,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
 
     # Training loop.
     optimizer = Adam(learning_rate=lambda: lr)  # Dynamic learning rate.
+    loss_fn = MeanSquaredError()
     best_loss = np.Inf
     plateau_count = 0
     for epoch in range(max_epochs + 1):
@@ -108,12 +110,12 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
             train_data = train_data.prefetch(1)
 
             # Train the model.
-            train_loss, train_acc = process(model, train_data, fractions, optimizer)
+            train_loss, train_acc = process(model, train_data, fractions, optimizer, loss_fn)
             write_log(f"TRAIN LOSS: {train_loss:.3f} " + "".join(
                 [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, train_acc)]), logfile)
 
         # Test the model on the validation set.
-        valid_loss, valid_acc = process(model, valid_data, fractions, None)
+        valid_loss, valid_acc = process(model, valid_data, fractions)
         write_log(f"VALID LOSS: {valid_loss:.3f} " + "".join(
             [f" {100 * frac:.0f}%: {acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
 
@@ -134,7 +136,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
                 write_log(f"  {plateau_count} epochs without improvement, decreasing learning rate to {lr}", logfile)
 
     model.restore_state(os.path.join(running_dir, 'best_params.pkl'))
-    valid_loss, valid_acc = process(model, valid_data, fractions, None)
+    valid_loss, valid_acc = process(model, valid_data, fractions)
     write_log(f"BEST VALID LOSS: {valid_loss:.3f} " + "".join(
         [f" {100 * frac:.0f}%: {acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
 
@@ -176,13 +178,14 @@ def pretrain(model: GCNN, dataloader: tf.data.Dataset):
     return i
 
 
-def process(model: GCNN, dataloader: tf.data.Dataset, fractions: list[int], optimizer=None):
+def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, optimizer=None, loss_fn=None):
     """Runs the input data through the model, training it if an optimizer is provided.
 
     :param model: The model.
     :param dataloader: The input dataset to process.
     :param fractions: A list of fractions to compute the accuracy over (top x% correct).
     :param optimizer: An optional optimizer used for training the model.
+    :param loss_fn: An optional loss function used for training the model.
     :return: The mean loss and accuracy over the input data.
     """
 
@@ -194,37 +197,45 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: list[int], opti
         (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
          n_vars, n_cuts, improvements) = batch
         batched_states = cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, \
-                         cut_edge_feats, n_cons, n_vars, n_cuts
-        batch_size = len(n_cs.numpy())
+                         cut_edge_feats, tf.reduce_sum(
+            n_cons), tf.reduce_sum(n_vars), tf.reduce_sum(n_cuts)
+        batch_size = len(n_cons.numpy())
 
         if optimizer:
+            # Train the model.
             with tf.GradientTape() as tape:
                 predictions = model(batched_states, tf.convert_to_tensor(True))
-                loss = tf.losses.sparse_softmax_cross_entropy(labels=best_cands, logits=logits)
+                loss = loss_fn(improvements, predictions)
             grads = tape.gradient(target=loss, sources=model.variables)
             optimizer.apply_gradients(zip(grads, model.variables))
         else:
-            logits = model(batched_states, tf.convert_to_tensor(False))  # eval mode
-            logits = tf.expand_dims(tf.gather(tf.squeeze(logits, 0), cands), 0)  # filter candidate variables
-            logits = model.pad_output(logits, n_cands.numpy())  # apply padding now
-            loss = tf.losses.sparse_softmax_cross_entropy(labels=best_cands, logits=logits)
+            # Evaluate the model.
+            predictions = model(batched_states, tf.convert_to_tensor(False))
+            loss = loss_fn(improvements, predictions)
 
-        true_scores = model.pad_output(tf.reshape(cand_scores, (1, -1)), n_cands)
-        true_bestscore = tf.reduce_max(true_scores, axis=-1, keepdims=True)
-        true_scores = true_scores.numpy()
-        true_bestscore = true_bestscore.numpy()
+        # Measure how often it ranks the highest-quality cuts correctly.
+        predictions = tf.split(value=predictions, num_or_size_splits=n_cuts, axis=1).numpy()
+        improvements = tf.split(value=improvements, num_or_size_splits=n_cuts, axis=1).numpy()
 
-        # Measure how often it ranks the highest-quality cuts correctly (10%, 25%, 50%?)
+        # TEST!
+        acc = np.zeros(len(predictions), len(fractions))
+        for i in range(len(predictions)):
+            pred = predictions[i]
+            true = improvements[i]
 
-        kacc = []
-        for k in top_k:
-            pred_top_k = tf.nn.top_k(logits, k=k)[1].numpy()
-            pred_top_k_true_scores = np.take_along_axis(true_scores, pred_top_k, axis=1)
-            kacc.append(np.mean(np.any(pred_top_k_true_scores == true_bestscore, axis=1)))
-        kacc = np.asarray(kacc)
+            # Sort the cut indices based on the predicted and true bound improvements.
+            pred_ranking = np.array(sorted(range(len(pred)), key=lambda x: pred[x], reverse=True))
+            true_ranking = np.array(sorted(range(len(true)), key=lambda x: true[x], reverse=True))
+
+            # Find the first index that deviates.
+            deviation = np.argmax(pred_ranking != true_ranking)
+
+            # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
+            frac = deviation / len(pred)
+            acc[i, :] += frac >= fractions
 
         mean_loss += loss.numpy() * batch_size
-        mean_acc += kacc * batch_size
+        mean_acc += acc * batch_size
         n_samples += batch_size
 
     mean_loss /= n_samples

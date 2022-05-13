@@ -266,9 +266,9 @@ class GCNN(BaseModel):
         - *cut_feats*: 2D cut candidate feature tensor of shape (sum(*n_cuts*), *n_cut_features*).
         - *cut_edge_inds*: 2D edge index tensor of shape (2, *n_cut_edges*).
         - *cut_edge_feats*: 2D edge feature tensor of shape (*n_cut_edges*, *n_edge_features*).
-        - *n_cons*: 1D tensor that contains the number of constraints for each sample.
-        - *n_vars*: 1D tensor that contains the number of variables for each sample.
-        - *n_cuts*: 1D tensor that contains the number of cut candidates for each sample.
+        - *n_cons*: The total number of constraints.
+        - *n_vars*: The total number of variables.
+        - *n_cuts*: The total number of cuts.
 
         :param inputs: The model input.
         :param training: True if in training mode.
@@ -278,9 +278,6 @@ class GCNN(BaseModel):
 
         (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
          n_vars, n_cuts) = inputs
-        n_cons_total = tf.reduce_sum(n_cons)
-        n_vars_total = tf.reduce_sum(n_vars)
-        n_cuts_total = tf.reduce_sum(n_cuts)
 
         # Embeddings.
         cons_feats = self.cons_embedding(cons_feats)
@@ -290,32 +287,12 @@ class GCNN(BaseModel):
         cut_edge_feats = self.cut_edge_embedding(cut_edge_feats)
 
         # Partial graph convolutions.
-        cons_feats = self.conv_v_to_c((cons_feats, cons_edge_inds, cons_edge_feats, var_feats, n_cons_total), training)
-        var_feats = self.conv_c_to_v((cons_feats, cons_edge_inds, cons_edge_feats, var_feats, n_vars_total), training)
-        cut_feats = self.conv_v_to_k((cut_feats, cut_edge_inds, cut_edge_feats, var_feats, n_cuts_total), training)
+        cons_feats = self.conv_v_to_c((cons_feats, cons_edge_inds, cons_edge_feats, var_feats, n_cons), training)
+        var_feats = self.conv_c_to_v((cons_feats, cons_edge_inds, cons_edge_feats, var_feats, n_vars), training)
+        cut_feats = self.conv_v_to_k((cut_feats, cut_edge_inds, cut_edge_feats, var_feats, n_cuts), training)
 
         # Output.
         output = self.output_module(cut_feats)
-        output = tf.reshape(output, [1, -1])
-
-        # Split and pad the output if there are multiple samples.
-        if n_cuts.shape[0] > 1:
-            output = self.pad_output(output, n_cuts)
-
-        return output
-
-    @staticmethod
-    def pad_output(output, n_cuts: int):
-        """Splits the output by sample and pads with zeros.
-
-        :param output: An output tensors of shape (1, sum(*n_cuts*)).
-        :param n_cuts: The number of cut candidates in each sample.
-        :return: A padded tensor of shape (*n_samples, max_cuts*).
-        """
-
-        n_cuts_max = tf.reduce_max(n_cuts)
-        output = tf.split(value=output, num_or_size_splits=n_cuts, axis=1)
-        output = tf.concat([tf.pad(x, paddings=[[0, 0], [0, n_cuts_max - tf.shape(x)[1]]]) for x in output], axis=0)
         return output
 
 
