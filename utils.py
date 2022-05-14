@@ -1,20 +1,17 @@
-"""This module provides some useful helper methods.
+"""This module provides some general utility methods.
 
 Summary
 =======
-This module provides methods for randomly generated set covering, combinatorial auction, capacitated facility location,
-and maximum independent set problem instances. The methods in this module are based on [1]_.
-
-Classes
-========
-- :class:`Graph`: Data type for a general graph structure with methods for random graph generation.
+This module provides general utility methods. The methods in this module are based the code by [1]_.
 
 Functions
 =========
-- :func:`generate_setcov`: Generates a random set cover problem instance.
-- :func:`generate_combauc`: Generates a random combinatorial auction problem instance.
-- :func:`generate_capfac`: Generates a random capacitated facility location problem instance.
-- :func:`generate_indset`: Generates a random maximum independent set problem instance.
+- :func:`get_state`: Extracts the graph representation of the problem at the current solver state.
+- :func:`get_objcos`: Computes the cosine similarity between a row and the objective function.
+- :func:`init_scip`: Initializes the SCIP model parameters.
+- :func:`load_batch_tf`: Loads a batch of samples for use in TensorFlow models.
+- :func:`load_batch`: Load and concatenate samples into one stacked mini-batch, for use in a GCNN model.
+- :func:`write_log`: Writes the specified text to a log file.
 
 References
 ==========
@@ -81,7 +78,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
                                             [row.getBasisStatus() == 'upper' for row in rows[has_rhs]])).reshape(-1, 1)
 
     # Compute cosine similarity with the objective function.
-    cosines = np.array([get_objCosine(rows[i], row_norms[i], obj_norm) for i in range(n_rows)])
+    cosines = np.array([get_objcos(rows[i], row_norms[i], obj_norm) for i in range(n_rows)])
     row_feats['obj_cosine'] = np.concatenate((-cosines[has_lhs], cosines[has_rhs])).reshape(-1, 1)
 
     # Compute the dual solution value, normalized by the product of the row and objective norm.
@@ -228,7 +225,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     return row_feats, row_edge_feats, col_feats, cut_feats, cut_edge_feats
 
 
-def get_objCosine(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
+def get_objcos(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
     """Computes the cosine similarity between a row and the objective function.
 
     :param row: The row.
@@ -376,7 +373,7 @@ def load_batch(sample_files):
 
 
 def write_log(text, logfile):
-    """Writes the specified text to a log file
+    """Writes the specified text to a log file.
 
     :param text: The text to be logged.
     :param logfile: The path to the log file.

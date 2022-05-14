@@ -1,4 +1,3 @@
-import argparse
 import csv
 import importlib
 import os
@@ -8,132 +7,158 @@ import time
 
 import numpy as np
 import pyscipopt as scip
-import svmrank
 import tensorflow as tf
-import tensorflow.contrib.eager as tfe
-import utilities
+from numpy.random import default_rng
+from pyscipopt import SCIP_RESULT
+from pyscipopt.scip import Cutsel
+
+from model import GCNN
+from utils import get_state
 
 
-class PolicyBranching(scip.Branchrule):
+class GCNNCutsel(Cutsel):
+    """Graph convolutional neural network (GCNN) cut selector.
 
-    def __init__(self, policy):
-        super().__init__()
+    This class extends PySCIPOpt's Cutsel class for user-defined cut selector plugins.
 
-        self.policy_type = policy['type']
-        self.policy_name = policy['name']
+    Methods
+    =======
+    - :meth:`cutselselect`: This method is called whenever cuts need to be ranked.
 
-        if self.policy_type == 'gcnn':
-            model = policy['model']
-            model.restore_state(policy['parameters'])
-            self.policy = tfe.defun(model.call, input_signature=model.input_signature)
+    :ivar episode: The episode number (instance/seed combination).
+    :ivar instance: The filepath to the current instance.
+    :ivar out_queue: The out queue where the sampling agent should send samples to.
+    :ivar out_dir: The save file path for samples.
+    :ivar seed: A seed value for the random number generator.
+    :ivar p_expert: The probability of querying the expert on each cut selection round.
+    :ivar p_max: The maximum parallelism for low-quality cuts.
+    :ivar p_max_ub: The maximum parallelism for high-quality cuts.
+    :ivar skip_factor: The factor that determines the high-quality threshold relative to the highest-quality cut.
+    """
 
-        elif self.policy_type == 'internal':
-            self.policy = policy['name']
+    def __init__(self, model: GCNN, parameters: str, p_expert=0.05, p_max=0.1, p_max_ub=0.5, skip_factor=0.9):
+        model.restore_state(parameters)
 
-        elif self.policy_type == 'ml-competitor':
-            self.policy = policy['model']
+        # Compile the model call as TensorFlow function for performance.
+        self.get_improvements = tf.function(model.call, input_signature=model.input_signature)
 
-            # feature parameterization
-            self.feat_shift = policy['feat_shift']
-            self.feat_scale = policy['feat_scale']
-            self.feat_specs = policy['feat_specs']
+        self.p_expert = p_expert
+        self.p_max = p_max
+        self.p_max_ub = p_max_ub
+        self.skip_factor = skip_factor
 
-        else:
-            raise NotImplementedError
+    def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
+        """Samples expert (state, action) pairs based on bound improvement.
 
-    def branchinitsol(self):
-        self.ndomchgs = 0
-        self.ncutoffs = 0
-        self.state_buffer = {}
-        self.khalil_root_buffer = {}
+        Whenever the expert is not queried, the method falls back to hybrid cut selection rule.
 
-    def branchexeclp(self, allowaddcons):
+        :param cuts: A list of cut candidates.
+        :param forcedcuts: A list of forced cuts, that are not subject to selection.
+        :param root: True if we are at the root node.
+        :param maxnselectedcuts: The maximum number of selected cuts.
+        :return: A dictionary of the form {'cuts': np.array, 'nselectedcuts': int, 'result': SCIP_RESULT},
+            where 'cuts' represent the resorted array of cuts in descending order of cut quality, 'nselectedcuts'
+            represents the number of cuts that should be selected from cuts (the first 'nselectedcuts'), and 'result'
+            signals to SCIP that everything worked out.
+        """
 
-        # SCIP internal branching rule
-        if self.policy_type == 'internal':
-            result = self.model.executeBranchRule(self.policy, allowaddcons)
+        # Extract the state.
+        state = get_state(self.model, cuts)
+        cons_feats, cons_edge_feats, var_feats, cut_feats, cut_edge_feats = state
 
-        # custom policy branching
-        else:
-            candidate_vars, *_ = self.model.getPseudoBranchCands()
-            candidate_mask = [var.getCol().getLPPos() for var in candidate_vars]
+        # Convert everything to tensors.
+        cons_feats = tf.convert_to_tensor(cons_feats['values'], dtype=tf.float32)
+        cons_edge_inds = tf.convert_to_tensor(cons_edge_feats['indices'], dtype=tf.int32)
+        cons_edge_feats = tf.convert_to_tensor(cons_edge_feats['values'], dtype=tf.float32)
+        var_feats = tf.convert_to_tensor(var_feats['values'], dtype=tf.float32)
+        cut_feats = tf.convert_to_tensor(cut_feats['values'], dtype=tf.float32)
+        cut_edge_inds = tf.convert_to_tensor(cut_edge_feats['indices'], dtype=tf.int32)
+        cut_edge_feats = tf.convert_to_tensor(cut_edge_feats['values'], dtype=tf.float32)
+        n_cons = tf.convert_to_tensor(cons_feats.shape[0], dtype=tf.int32)
+        n_vars = tf.convert_to_tensor(var_feats.shape[0], dtype=tf.int32)
+        n_cuts = tf.convert_to_tensor(cut_feats.shape[0], dtype=tf.int32)
 
-            # initialize root buffer for Khalil features extraction
-            if self.model.getNNodes() == 1 and self.policy_type == 'ml-competitor' and self.feat_specs['type'] in (
-            'khalil', 'all'):
-                utilities.extract_khalil_variable_features(self.model, [], self.khalil_root_buffer)
+        state = cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, \
+                n_cons, n_vars, n_cuts
 
-            if len(candidate_vars) == 1:
-                best_var = candidate_vars[0]
+        # Get the predicted bound improvements.
+        quality = self.get_improvements(state, tf.convert_to_tensor(False)).numpy()
 
-            elif self.policy_type == 'gcnn':
-                state = utilities.extract_state(self.model, self.state_buffer)
+        # Rank the cuts in descending order of quality.
+        rankings = sorted(range(len(cuts)), key=lambda x: quality[x], reverse=True)
+        sorted_cuts = np.array([cuts[rank] for rank in rankings])
 
-                # convert state to tensors
-                c, e, v = state
-                state = (tf.convert_to_tensor(c['values'], dtype=tf.float32),
-                         tf.convert_to_tensor(e['indices'], dtype=tf.int32),
-                         tf.convert_to_tensor(e['values'], dtype=tf.float32),
-                         tf.convert_to_tensor(v['values'], dtype=tf.float32),
-                         tf.convert_to_tensor([c['values'].shape[0]], dtype=tf.int32),
-                         tf.convert_to_tensor([v['values'].shape[0]], dtype=tf.int32),)
+        # Sort cut quality in descending order as well to match the array with sorted cuts.
+        quality = -np.sort(-quality)
 
-                var_logits = self.policy(state, tf.convert_to_tensor(False)).numpy().squeeze(0)
+        # First check whether any cuts are parallel to forced cuts.
+        n_selected = len(cuts)
+        for cut in forcedcuts:
+            # Mark all cuts that are parallel to forced cut i.
+            parallelism = [self.model.getRowParallelism(cut, sorted_cuts[j]) for j in range(n_selected)]
+            parallelism = np.pad(parallelism, (0, len(cuts) - n_selected), constant_values=0)
+            marked = (parallelism > self.p_max)
 
-                candidate_scores = var_logits[candidate_mask]
-                best_var = candidate_vars[candidate_scores.argmax()]
+            # Only remove low-quality or very parallel cuts.
+            low_quality = np.logical_or(quality < 0.9 * quality[0], parallelism > self.p_max_ub)
+            to_remove = np.logical_and(marked, low_quality)
 
-            elif self.policy_type == 'ml-competitor':
+            # Move cuts that are marked for removal to the back and decrease number of selected cuts.
+            removed = sorted_cuts[to_remove]
+            sorted_cuts = np.delete(sorted_cuts, to_remove)
+            sorted_cuts = np.concatenate((sorted_cuts, removed))
+            n_selected -= removed.size
 
-                # build candidate features
-                candidate_states = []
-                if self.feat_specs['type'] in ('all', 'gcnn_agg'):
-                    state = utilities.extract_state(self.model, self.state_buffer)
-                    candidate_states.append(utilities.compute_extended_variable_features(state, candidate_mask))
-                if self.feat_specs['type'] in ('all', 'khalil'):
-                    candidate_states.append(
-                        utilities.extract_khalil_variable_features(self.model, candidate_vars, self.khalil_root_buffer))
-                candidate_states = np.concatenate(candidate_states, axis=1)
+        # Now remove cuts of low quality that are parallel to a cut of higher quality.
+        i = 0
+        while i < n_selected - 1:
+            # Mark all cuts that are parallel to higher-quality cut i.
+            parallelism = [self.model.getRowParallelism(sorted_cuts[i], sorted_cuts[j]) for j in
+                           range(i + 1, len(sorted_cuts))]
+            parallelism = np.pad(parallelism, (i + 1, 0), constant_values=0)
+            marked = (parallelism > self.p_max)
 
-                # feature preprocessing
-                candidate_states = utilities.preprocess_variable_features(candidate_states, self.feat_specs['augment'],
-                                                                          self.feat_specs['qbnorm'])
+            # Only remove low-quality or very parallel cuts.
+            low_quality = np.logical_or(quality < 0.9 * quality[0], parallelism > self.p_max_ub)
+            to_remove = np.logical_and(marked, low_quality)
 
-                # feature normalization
-                candidate_states = (candidate_states - self.feat_shift) / self.feat_scale
+            # Move cuts that are marked for removal to the back and decrease number of selected cuts.
+            removed = sorted_cuts[to_remove]
+            sorted_cuts = np.delete(sorted_cuts, to_remove)
+            sorted_cuts = np.concatenate((sorted_cuts, removed))
+            n_selected -= removed.size
+            i += 1
 
-                candidate_scores = self.policy.predict(candidate_states)
-                best_var = candidate_vars[candidate_scores.argmax()]
-
-            else:
-                raise NotImplementedError
-
-            self.model.branchVar(best_var)
-            result = scip.SCIP_RESULT.BRANCHED
-
-        # fair node counting
-        if result == scip.SCIP_RESULT.REDUCEDDOM:
-            self.ndomchgs += 1
-        elif result == scip.SCIP_RESULT.CUTOFF:
-            self.ncutoffs += 1
-
-        return {'result': result}
+        return {'cuts': sorted_cuts, 'nselectedcuts': min(n_selected, maxnselectedcuts), 'result': SCIP_RESULT.SUCCESS}
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('problem', help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities', 'indset'], )
-    parser.add_argument('-g', '--gpu', help='CUDA GPU id (-1 for CPU).', type=int, default=0, )
-    args = parser.parse_args()
+def evaluate_models(seed: int):
+    """Evaluates the models in accordance with our evaluation scheme.
 
-    result_file = f"{args.problem}_{time.strftime('%Y%m%d-%H%M%S')}.csv"
+    :param seed: The same seed value that was used to train the models.
+    """
+
+    seed_generator = default_rng(seed)
+    seeds = seed_generator.integers(2 ** 32, size=5)
+
+    print("Evaluating models...")
+    evaluate_model('setcov', seeds)
+    evaluate_model('combauc', seeds)
+    evaluate_model('capfac', seeds)
+    evaluate_model('indset', seeds)
+    print("Done!")
+
+
+def evaluate_model(problem: str, seeds: np.array):
+    problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c',
+                       'indset': 'indset/500n'}
+    problem_folder = problem_folders[problem]
+
+    os.makedirs('results', exist_ok=True)
+    result_file = f"results/{problem}_eval.csv"
+
+    # Retrieve
     instances = []
-    seeds = [0, 1, 2, 3, 4]
-    gcnn_models = ['baseline']
-    other_models = ['extratrees_gcnn_agg', 'lambdamart_khalil', 'svmrank_khalil']
-    internal_branchers = ['relpscost']
-    time_limit = 3600
 
     if args.problem == 'setcover':
         instances += [
@@ -144,7 +169,6 @@ if __name__ == '__main__':
             in range(20)]
         instances += [{'type': 'big', 'path': f"data/instances/setcover/transfer_2000r_1000c_0.05d/instance_{i + 1}.lp"}
                       for i in range(20)]
-        gcnn_models += ['mean_convolution', 'no_prenorm']
 
     elif args.problem == 'cauctions':
         instances += [{'type': 'small', 'path': f"data/instances/cauctions/transfer_100_500/instance_{i + 1}.lp"} for i
@@ -183,12 +207,12 @@ if __name__ == '__main__':
     for model in other_models:
         for seed in seeds:
             branching_policies.append({'type': 'ml-competitor', 'name': model, 'seed': seed,
-                'model': f'trained_models/{args.problem}/{model}/{seed}', })
+                                       'model': f'trained_models/{args.problem}/{model}/{seed}', })
     # GCNN models
     for model in gcnn_models:
         for seed in seeds:
             branching_policies.append({'type': 'gcnn', 'name': model, 'seed': seed,
-                'parameters': f'trained_models/{args.problem}/{model}/{seed}/best_params.pkl'})
+                                       'parameters': f'trained_models/{args.problem}/{model}/{seed}/best_params.pkl'})
 
     print(f"problem: {args.problem}")
     print(f"gpu: {args.gpu}")
@@ -238,9 +262,8 @@ if __name__ == '__main__':
     print("running SCIP...")
 
     fieldnames = ['policy', 'seed', 'type', 'instance', 'nnodes', 'nlps', 'stime', 'gap', 'status', 'ndomchgs',
-        'ncutoffs', 'walltime', 'proctime', ]
-    os.makedirs('results', exist_ok=True)
-    with open(f"results/{result_file}", 'w', newline='') as csvfile:
+                  'ncutoffs', 'walltime', 'proctime', ]
+    with open(result_file, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -259,7 +282,8 @@ if __name__ == '__main__':
 
                 brancher = PolicyBranching(policy)
                 m.includeBranchrule(branchrule=brancher, name=f"{policy['type']}:{policy['name']}",
-                    desc=f"Custom PySCIPOpt branching policy.", priority=666666, maxdepth=-1, maxbounddist=1)
+                                    desc=f"Custom PySCIPOpt branching policy.", priority=666666, maxdepth=-1,
+                                    maxbounddist=1)
 
                 walltime = time.perf_counter()
                 proctime = time.process_time()
@@ -279,14 +303,13 @@ if __name__ == '__main__':
 
                 writer.writerow(
                     {'policy': f"{policy['type']}:{policy['name']}", 'seed': policy['seed'], 'type': instance['type'],
-                        'instance': instance['path'], 'nnodes': nnodes, 'nlps': nlps, 'stime': stime, 'gap': gap,
-                        'status': status, 'ndomchgs': ndomchgs, 'ncutoffs': ncutoffs, 'walltime': walltime,
-                        'proctime': proctime, })
+                     'instance': instance['path'], 'nnodes': nnodes, 'nlps': nlps, 'stime': stime, 'gap': gap,
+                     'status': status, 'ndomchgs': ndomchgs, 'ncutoffs': ncutoffs, 'walltime': walltime,
+                     'proctime': proctime, })
 
                 csvfile.flush()
                 m.freeProb()
 
-                print(
-                    f"  {policy['type']}:{policy['name']} {policy['seed']} - {nnodes} ("
-                    f"{nnodes + 2 * (ndomchgs + ncutoffs)}) nodes {nlps} lps {stime:.2f} ({walltime:.2f} wall "
-                    f"{proctime:.2f} proc) s. {status}")
+                print(f"  {policy['type']}:{policy['name']} {policy['seed']} - {nnodes} ("
+                      f"{nnodes + 2 * (ndomchgs + ncutoffs)}) nodes {nlps} lps {stime:.2f} ({walltime:.2f} wall "
+                      f"{proctime:.2f} proc) s. {status}")

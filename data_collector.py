@@ -3,7 +3,7 @@
 Summary
 =======
 This module provides methods for collecting data for imitation learning, based on an expert decision rule that ranks
-cuts by their bound improvement. The methods in this module are based on [1]_.
+cuts by their bound improvement. The methods in this module are based the code by [1]_.
 
 Classes
 ========
@@ -152,7 +152,7 @@ class SamplingAgent(Cutsel):
             # Mark all cuts that are parallel to forced cut i.
             parallelism = [self.model.getRowParallelism(cut, sorted_cuts[j]) for j in range(n_selected)]
             parallelism = np.pad(parallelism, (0, len(cuts) - n_selected), constant_values=0)
-            marked = parallelism > self.p_max
+            marked = (parallelism > self.p_max)
 
             # Only remove low-quality or very parallel cuts.
             low_quality = np.logical_or(quality < 0.9 * quality[0], parallelism > self.p_max_ub)
@@ -171,7 +171,7 @@ class SamplingAgent(Cutsel):
             parallelism = [self.model.getRowParallelism(sorted_cuts[i], sorted_cuts[j]) for j in
                            range(i + 1, len(sorted_cuts))]
             parallelism = np.pad(parallelism, (i + 1, 0), constant_values=0)
-            marked = parallelism > self.p_max
+            marked = (parallelism > self.p_max)
 
             # Only remove low-quality or very parallel cuts.
             low_quality = np.logical_or(quality < 0.9 * quality[0], parallelism > self.p_max_ub)

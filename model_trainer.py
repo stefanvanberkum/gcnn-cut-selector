@@ -1,8 +1,29 @@
+"""This module provides methods for training the GCNN model.
+
+Summary
+=======
+This module provides methods for training the GCNN model. The methods in this module are based the code by [1]_.
+
+Functions
+=========
+- :func:`train_models`: Trains the models in accordance with our training scheme.
+- :func:`train_model`: Trains a model.
+- :func:`pretrain`: Pretrains a model.
+- :func:`process`: Runs the input data through a model, training it if an optimizer is provided.
+
+References
+==========
+.. [1] Gasse, M., Chételat, D., Ferroni, N., Charlin, L., & Lodi, A. (2019). Exact combinatorial optimization with
+    graph convolutional neural networks. *Neural Information Processing Systems (NeurIPS 2019)*, 15580–15592.
+    https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
+"""
+
 import os
 import pathlib
 
 import numpy as np
 import tensorflow as tf
+from numpy.random import default_rng
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.optimizers import Adam
 
@@ -10,9 +31,28 @@ from model import GCNN
 from utils import load_batch_tf, write_log
 
 
+def train_models(seed: int):
+    """Trains the models in accordance with our training scheme.
+
+    :param seed: A seed value for the random number generator.
+    """
+
+    seed_generator = default_rng(seed)
+    seeds = seed_generator.integers(2 ** 32, size=5)
+
+    print("Training models...")
+    for i in range(5):
+        print(f"Iteration: {i}")
+        train_model('setcov', seeds[i])
+        train_model('combauc', seeds[i])
+        train_model('capfac', seeds[i])
+        train_model('indset', seeds[i])
+    print("Done!")
+
+
 def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_size=32, pretrain_batch_size=128,
                 valid_batch_size=128, lr=0.001, patience=10, early_stopping=20):
-    """Trains the model.
+    """Trains a model.
 
     On the first epoch, the model is pretrained. Afterwards, regular training commences. The learning rate is
     dynamically adapted using the *patience* parameter. Whenever the number of consecutive epochs without improvement
@@ -35,11 +75,10 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     fractions = np.array([0.25, 0.5, 0.75, 1])
 
     problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c',
-                       'indset': 'indset/500n', }
+                       'indset': 'indset/500n'}
     problem_folder = problem_folders[problem]
 
     running_dir = f"trained_models/{problem}/{seed}"
-
     os.makedirs(running_dir)
 
     # Create log file.
@@ -60,7 +99,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     rng = np.random.default_rng(seed)
     tf.random.set_seed(rng.integers(np.iinfo(int).max))
 
-    # Set up dataset.
+    # Retrieve training and validation samples.
     train_files = list(pathlib.Path(f'data/samples/{problem_folder}/train').glob('sample_*.pkl'))
     valid_files = list(pathlib.Path(f'data/samples/{problem_folder}/valid').glob('sample_*.pkl'))
 
@@ -70,18 +109,20 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     train_files = [str(x) for x in train_files]
     valid_files = [str(x) for x in valid_files]
 
+    # Prepare validation dataset.
     valid_data = tf.data.Dataset.from_tensor_slices(valid_files)
     valid_data = valid_data.batch(valid_batch_size)
     valid_data = valid_data.map(load_batch_tf)
     valid_data = valid_data.prefetch(1)
 
+    # Prepare pretraining dataset.
     pretrain_files = [file for i, file in enumerate(train_files) if i % 10 == 0]
     pretrain_data = tf.data.Dataset.from_tensor_slices(pretrain_files)
     pretrain_data = pretrain_data.batch(pretrain_batch_size)
     pretrain_data = pretrain_data.map(load_batch_tf)
     pretrain_data = pretrain_data.prefetch(1)
 
-    # Load model.
+    # Initialize the model.
     model = GCNN()
 
     # Training loop.
@@ -103,7 +144,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
             # Sample training files with replacement.
             epoch_train_files = rng.choice(train_files, epoch_size * batch_size, replace=True)
 
-            # Create dataset.
+            # Prepare training dataset.
             train_data = tf.data.Dataset.from_tensor_slices(epoch_train_files)
             train_data = train_data.batch(batch_size)
             train_data = train_data.map(load_batch_tf)
@@ -117,7 +158,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
         # Test the model on the validation set.
         valid_loss, valid_acc = process(model, valid_data, fractions)
         write_log(f"VALID LOSS: {valid_loss:.3f} " + "".join(
-            [f" {100 * frac:.0f}%: {acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
+            [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
 
         if valid_loss < best_loss:
             # Improvement in this epoch.
@@ -138,7 +179,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     model.restore_state(os.path.join(running_dir, 'best_params.pkl'))
     valid_loss, valid_acc = process(model, valid_data, fractions)
     write_log(f"BEST VALID LOSS: {valid_loss:.3f} " + "".join(
-        [f" {100 * frac:.0f}%: {acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
+        [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
 
 
 def pretrain(model: GCNN, dataloader: tf.data.Dataset):
@@ -179,7 +220,7 @@ def pretrain(model: GCNN, dataloader: tf.data.Dataset):
 
 
 def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, optimizer=None, loss_fn=None):
-    """Runs the input data through the model, training it if an optimizer is provided.
+    """Runs the input data through a model, training it if an optimizer is provided.
 
     :param model: The model.
     :param dataloader: The input dataset to process.
@@ -196,9 +237,12 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, optim
     for batch in dataloader:
         (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
          n_vars, n_cuts, improvements) = batch
+
+        n_cons_total = tf.reduce_sum(n_cons)
+        n_vars_total = tf.reduce_sum(n_vars)
+        n_cuts_total = tf.reduce_sum(n_cuts)
         batched_states = cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, \
-                         cut_edge_feats, tf.reduce_sum(
-            n_cons), tf.reduce_sum(n_vars), tf.reduce_sum(n_cuts)
+                         cut_edge_feats, n_cons_total, n_vars_total, n_cuts_total
         batch_size = len(n_cons.numpy())
 
         if optimizer:
@@ -213,29 +257,33 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, optim
             predictions = model(batched_states, tf.convert_to_tensor(False))
             loss = loss_fn(improvements, predictions)
 
-        # Measure how often it ranks the highest-quality cuts correctly.
-        predictions = tf.split(value=predictions, num_or_size_splits=n_cuts, axis=1).numpy()
-        improvements = tf.split(value=improvements, num_or_size_splits=n_cuts, axis=1).numpy()
+        # Measure how often the model ranks the highest-quality cuts correctly.
+        predictions = tf.split(value=predictions, num_or_size_splits=n_cuts)
+        improvements = tf.split(value=improvements, num_or_size_splits=n_cuts)
 
-        # TEST!
-        acc = np.zeros(len(predictions), len(fractions))
-        for i in range(len(predictions)):
-            pred = predictions[i]
-            true = improvements[i]
+        acc = np.zeros(len(fractions))
+        for i in range(batch_size):
+            pred = predictions[i].numpy()
+            true = improvements[i].numpy()
 
             # Sort the cut indices based on the predicted and true bound improvements.
             pred_ranking = np.array(sorted(range(len(pred)), key=lambda x: pred[x], reverse=True))
             true_ranking = np.array(sorted(range(len(true)), key=lambda x: true[x], reverse=True))
 
             # Find the first index that deviates.
-            deviation = np.argmax(pred_ranking != true_ranking)
+            differences = (pred_ranking != true_ranking)
+            if np.any(differences):
+                deviation = np.argmax(pred_ranking != true_ranking)
+            else:
+                # No deviations.
+                deviation = len(pred)
 
             # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
             frac = deviation / len(pred)
-            acc[i, :] += frac >= fractions
+            acc += (frac >= fractions)
 
         mean_loss += loss.numpy() * batch_size
-        mean_acc += acc * batch_size
+        mean_acc += acc
         n_samples += batch_size
 
     mean_loss /= n_samples

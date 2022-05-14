@@ -9,6 +9,8 @@ from numpy.random import default_rng
 
 from data_collector import collect_data
 from instance_generator import generate_instances
+from model_tester import test_models
+from model_trainer import train_models
 
 
 def main():
@@ -21,7 +23,7 @@ def main():
 
     n_jobs = cpu_count()
     seed_generator = default_rng(seed)
-    seeds = seed_generator.integers(2 ** 32, size=1)
+    seeds = seed_generator.integers(2 ** 32, size=3)
     start_time = time()
 
     if generate:
@@ -30,6 +32,14 @@ def main():
 
     if collect:
         collect_data(n_jobs, seeds[1])
+        print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
+
+    if train:
+        train_models(seeds[2])
+        print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
+
+    if test:
+        test_models(seeds[2])
         print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
 
 

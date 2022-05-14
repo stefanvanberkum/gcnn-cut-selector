@@ -2,7 +2,8 @@
 
 Summary
 =======
-This module provides the framework for the GCNN used for cut selection. The methods in this module are based on [1]_.
+This module provides the framework for the GCNN used for cut selection. The methods in this module are based the code
+by [1]_.
 
 Classes
 ========
@@ -49,10 +50,10 @@ class BaseModel(Model):
         :param path: The desired save path.
         """
 
-        with open(path, 'wb') as f:
+        with open(path, 'wb') as file:
             for v_name in self.variables_topological_order:
                 v = [v for v in self.variables if v.name == v_name][0]
-                pickle.dump(v.numpy(), f)
+                pickle.dump(v.numpy(), file)
 
     def restore_state(self, path: str):
         """Restore a stored state.
@@ -60,10 +61,10 @@ class BaseModel(Model):
         :param path: The path to a stored state.
         """
 
-        with open(path, 'rb') as f:
+        with open(path, 'rb') as file:
             for v_name in self.variables_topological_order:
                 v = [v for v in self.variables if v.name == v_name][0]
-                v.assign(pickle.load(f))
+                v.assign(pickle.load(file))
 
     def pretrain_init(self):
         """Initialize pretraining."""

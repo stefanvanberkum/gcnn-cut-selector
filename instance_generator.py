@@ -3,7 +3,7 @@
 Summary
 =======
 This module provides methods for randomly generated set covering, combinatorial auction, capacitated facility location,
-and maximum independent set problem instances. The methods in this module are based on [1]_.
+and maximum independent set problem instances. The methods in this module are based the code by [1]_.
 
 Classes
 ========
