@@ -150,59 +150,31 @@ def evaluate_models(seed: int):
 
 
 def evaluate_model(problem: str, seeds: np.array):
-    problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c',
-                       'indset': 'indset/500n'}
-    problem_folder = problem_folders[problem]
+    setcov_folders = ['setcov/eval_500r', 'setcov/eval_1000r', 'setcov/eval_2000r']
+    combauc_folders = ['combauc/eval_100i_500b', 'combauc/eval_200i_1000b', 'combauc/eval_300i_1500b']
+    capfac_folders = ['capfac/eval_100c', 'capfac/eval_200c', 'capfac/eval_400c']
+    indset_folders = ['indset/eval_500n', 'indset/eval_1000n', 'indset/eval_1500n']
+    folders = {'setcov': setcov_folders, 'combauc': combauc_folders, 'capfac': capfac_folders, 'indset': indset_folders}
+    problem_folders = folders[problem]
 
     os.makedirs('results', exist_ok=True)
     result_file = f"results/{problem}_eval.csv"
 
-    # Retrieve
+    # Retrieve evaluation instances.
     instances = []
 
-    if args.problem == 'setcover':
-        instances += [
-            {'type': 'small', 'path': f"data/instances/setcover/transfer_500r_1000c_0.05d/instance_{i + 1}.lp"} for i in
-            range(20)]
-        instances += [
-            {'type': 'medium', 'path': f"data/instances/setcover/transfer_1000r_1000c_0.05d/instance_{i + 1}.lp"} for i
-            in range(20)]
-        instances += [{'type': 'big', 'path': f"data/instances/setcover/transfer_2000r_1000c_0.05d/instance_{i + 1}.lp"}
-                      for i in range(20)]
+    instances += [{'type': 'easy', 'path': f"data/instances/{problem_folders[0]}/instance_{i + 1}.lp"} for i in
+                  range(20)]
+    instances += [{'type': 'medium', 'path': f"data/instances/{problem_folders[1]}/instance_{i + 1}.lp"} for i in
+                  range(20)]
+    instances += [{'type': 'hard', 'path': f"data/instances/{problem_folders[2]}/instance_{i + 1}.lp"} for i in
+                  range(20)]
 
-    elif args.problem == 'cauctions':
-        instances += [{'type': 'small', 'path': f"data/instances/cauctions/transfer_100_500/instance_{i + 1}.lp"} for i
-                      in range(20)]
-        instances += [{'type': 'medium', 'path': f"data/instances/cauctions/transfer_200_1000/instance_{i + 1}.lp"} for
-                      i in range(20)]
-        instances += [{'type': 'big', 'path': f"data/instances/cauctions/transfer_300_1500/instance_{i + 1}.lp"} for i
-                      in range(20)]
+    cut_selectors = []
 
-    elif args.problem == 'facilities':
-        instances += [{'type': 'small', 'path': f"data/instances/facilities/transfer_100_100_5/instance_{i + 1}.lp"} for
-                      i in range(20)]
-        instances += [{'type': 'medium', 'path': f"data/instances/facilities/transfer_200_100_5/instance_{i + 1}.lp"}
-                      for i in range(20)]
-        instances += [{'type': 'big', 'path': f"data/instances/facilities/transfer_400_100_5/instance_{i + 1}.lp"} for i
-                      in range(20)]
-
-    elif args.problem == 'indset':
-        instances += [{'type': 'small', 'path': f"data/instances/indset/transfer_500_4/instance_{i + 1}.lp"} for i in
-                      range(20)]
-        instances += [{'type': 'medium', 'path': f"data/instances/indset/transfer_1000_4/instance_{i + 1}.lp"} for i in
-                      range(20)]
-        instances += [{'type': 'big', 'path': f"data/instances/indset/transfer_1500_4/instance_{i + 1}.lp"} for i in
-                      range(20)]
-
-    else:
-        raise NotImplementedError
-
-    branching_policies = []
-
-    # SCIP internal brancher baselines
-    for brancher in internal_branchers:
-        for seed in seeds:
-            branching_policies.append({'type': 'internal', 'name': brancher, 'seed': seed, })
+    # SCIP's default hybrid cut selector.
+    for seed in seeds:
+        cut_selectors.append({'type': 'hybrid', 'name': brancher, 'seed': seed, })
     # ML baselines
     for model in other_models:
         for seed in seeds:
@@ -213,20 +185,6 @@ def evaluate_model(problem: str, seeds: np.array):
         for seed in seeds:
             branching_policies.append({'type': 'gcnn', 'name': model, 'seed': seed,
                                        'parameters': f'trained_models/{args.problem}/{model}/{seed}/best_params.pkl'})
-
-    print(f"problem: {args.problem}")
-    print(f"gpu: {args.gpu}")
-    print(f"time limit: {time_limit} s")
-
-    ### TENSORFLOW SETUP ###
-    if args.gpu == -1:
-        os.environ['CUDA_VISIBLE_DEVICES'] = ''
-    else:
-        os.environ['CUDA_VISIBLE_DEVICES'] = f'{args.gpu}'
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    tf.enable_eager_execution(config)
-    tf.executing_eagerly()
 
     # load and assign tensorflow models to policies (share models and update parameters)
     loaded_models = {}

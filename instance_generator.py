@@ -208,7 +208,7 @@ def generate_setcovs(rng: np.random.Generator):
     rows.extend([n_rows] * n_instances)
 
     # Easy evaluation instances (500x1000).
-    n_instances = 100
+    n_instances = 20
     n_rows = 500
     lp_dir = f'data/instances/setcov/eval_{n_rows}r'
     os.makedirs(lp_dir)
@@ -216,7 +216,7 @@ def generate_setcovs(rng: np.random.Generator):
     rows.extend([n_rows] * n_instances)
 
     # Medium evaluation instances (1000x1000).
-    n_instances = 100
+    n_instances = 20
     n_rows = 1000
     lp_dir = f'data/instances/setcov/eval_{n_rows}r'
     os.makedirs(lp_dir)
@@ -224,7 +224,7 @@ def generate_setcovs(rng: np.random.Generator):
     rows.extend([n_rows] * n_instances)
 
     # Hard evaluation instances (2000x1000).
-    n_instances = 100
+    n_instances = 20
     n_rows = 2000
     lp_dir = f'data/instances/setcov/eval_{n_rows}r'
     os.makedirs(lp_dir)
@@ -352,7 +352,7 @@ def generate_combaucs(rng: np.random.Generator):
     bids.extend([n_bids] * n_instances)
 
     # Easy evaluation instances (100x500).
-    n_instances = 100
+    n_instances = 20
     n_items = 100
     n_bids = 500
     lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
@@ -362,7 +362,7 @@ def generate_combaucs(rng: np.random.Generator):
     bids.extend([n_bids] * n_instances)
 
     # Medium evaluation instances (200x1000).
-    n_instances = 100
+    n_instances = 20
     n_items = 200
     n_bids = 1000
     lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
@@ -372,7 +372,7 @@ def generate_combaucs(rng: np.random.Generator):
     bids.extend([n_bids] * n_instances)
 
     # Hard evaluation instances (300x1500).
-    n_instances = 100
+    n_instances = 20
     n_items = 300
     n_bids = 1500
     lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
@@ -609,7 +609,7 @@ def generate_capfacs(rng: np.random.Generator):
     customers.extend([n_customers] * n_instances)
 
     # Easy evaluation instances (100x100).
-    n_instances = 100
+    n_instances = 20
     n_customers = 100
     lp_dir = f'data/instances/capfac/eval_{n_customers}c'
     os.makedirs(lp_dir)
@@ -617,7 +617,7 @@ def generate_capfacs(rng: np.random.Generator):
     customers.extend([n_customers] * n_instances)
 
     # Medium evaluation instances (100x200).
-    n_instances = 100
+    n_instances = 20
     n_customers = 200
     lp_dir = f'data/instances/capfac/eval_{n_customers}c'
     os.makedirs(lp_dir)
@@ -625,7 +625,7 @@ def generate_capfacs(rng: np.random.Generator):
     customers.extend([n_customers] * n_instances)
 
     # Hard evaluation instances (100x400).
-    n_instances = 100
+    n_instances = 20
     n_customers = 400
     lp_dir = f'data/instances/capfac/eval_{n_customers}c'
     os.makedirs(lp_dir)
@@ -754,7 +754,7 @@ def generate_indsets(rng: np.random.Generator):
     nodes.extend([n_nodes] * n_instances)
 
     # Easy evaluation instances (500 nodes).
-    n_instances = 100
+    n_instances = 20
     n_nodes = 500
     lp_dir = f'data/instances/indset/eval_{n_nodes}n'
     os.makedirs(lp_dir)
@@ -762,7 +762,7 @@ def generate_indsets(rng: np.random.Generator):
     nodes.extend([n_nodes] * n_instances)
 
     # Medium evaluation instances (1000 nodes).
-    n_instances = 100
+    n_instances = 20
     n_nodes = 1000
     lp_dir = f'data/instances/indset/eval_{n_nodes}n'
     os.makedirs(lp_dir)
@@ -770,7 +770,7 @@ def generate_indsets(rng: np.random.Generator):
     nodes.extend([n_nodes] * n_instances)
 
     # Hard evaluation instances (1500 nodes).
-    n_instances = 100
+    n_instances = 20
     n_nodes = 1500
     lp_dir = f'data/instances/indset/eval_{n_nodes}n'
     os.makedirs(lp_dir)
