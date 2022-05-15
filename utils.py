@@ -240,12 +240,12 @@ def get_objcos(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
     return dot / (row_norm * obj_norm)
 
 
-def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_clock=False):
+def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_time=False):
     """Initializes the SCIP model parameters.
 
     :param model: The SCIP model to be initialized.
     :param seed: The desired seed value to be used for variable permutation and other random components of the solver.
-    :param cpu_clock: True if CPU time should be used for timing, otherwise wall clock time will be used.
+    :param cpu_time: True if CPU time should be used for timing, otherwise wall clock time will be used.
     """
 
     # Trim seeds that exceed SCIP's maximum seed value.
@@ -264,7 +264,7 @@ def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_clock=False):
 
     # Set time settings.
     model.setRealParam('limits/time', 3600)
-    if cpu_clock:
+    if cpu_time:
         model.setIntParam('timing/clocktype', 1)
 
 

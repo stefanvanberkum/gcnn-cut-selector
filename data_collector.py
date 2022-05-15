@@ -36,7 +36,7 @@ import numpy as np
 from pyscipopt import Model, SCIP_LPSOLSTAT, SCIP_RESULT
 from pyscipopt.scip import Cutsel
 
-import utils
+from utils import get_state, init_scip
 
 
 class SamplingAgent(Cutsel):
@@ -123,7 +123,7 @@ class SamplingAgent(Cutsel):
 
             if uneventful:
                 # Record the (state, action) pair.
-                state = utils.get_state(self.model, cuts)
+                state = get_state(self.model, cuts)
                 data = [state, quality]
 
                 filename = f'{self.out_dir}/sample_{self.episode}_{self.sample_counter}.pkl'
@@ -386,7 +386,7 @@ def generate_samples(task_queue, out_queue):
 
         # Initialize the model.
         model = Model()
-        utils.init_scip(model, seed)
+        init_scip(model, seed)
         model.readProblem(f'{instance}')
 
         # Include the sampling agent as cut selector to extract (state, action) pairs.

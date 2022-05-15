@@ -13,7 +13,7 @@ from pyscipopt import SCIP_RESULT
 from pyscipopt.scip import Cutsel
 
 from model import GCNN
-from utils import get_state
+from utils import get_state, init_scip
 
 
 class GCNNCutsel(Cutsel):
@@ -174,17 +174,12 @@ def evaluate_model(problem: str, seeds: np.array):
 
     # SCIP's default hybrid cut selector.
     for seed in seeds:
-        cut_selectors.append({'type': 'hybrid', 'name': brancher, 'seed': seed, })
-    # ML baselines
-    for model in other_models:
-        for seed in seeds:
-            branching_policies.append({'type': 'ml-competitor', 'name': model, 'seed': seed,
-                                       'model': f'trained_models/{args.problem}/{model}/{seed}', })
-    # GCNN models
-    for model in gcnn_models:
-        for seed in seeds:
-            branching_policies.append({'type': 'gcnn', 'name': model, 'seed': seed,
-                                       'parameters': f'trained_models/{args.problem}/{model}/{seed}/best_params.pkl'})
+        cut_selectors.append({'type': 'hybrid', 'seed': seed})
+
+    # GCNN cut selector.
+    for seed in seeds:
+        cut_selectors.append({'type': 'gcnn', 'seed': seed,
+                              'parameters': f'trained_models/{args.problem}/{model}/{seed}/best_params.pkl'})
 
     # load and assign tensorflow models to policies (share models and update parameters)
     loaded_models = {}
@@ -219,55 +214,53 @@ def evaluate_model(problem: str, seeds: np.array):
 
     print("running SCIP...")
 
-    fieldnames = ['policy', 'seed', 'type', 'instance', 'nnodes', 'nlps', 'stime', 'gap', 'status', 'ndomchgs',
-                  'ncutoffs', 'walltime', 'proctime', ]
+    cut_selectors = ['hybrid', 'gcnn']
+
+    fieldnames = ['selector', 'seed', 'type', 'instance', 'n_nodes', 'n_lps', 'solve_time', 'gap', 'status',
+                  'wall_time', 'process_time']
     with open(result_file, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
         for instance in instances:
-            print(f"{instance['type']}: {instance['path']}...")
+            for selector in cut_selectors:  # Fix
+                for seed in seeds:
+                    rng = np.random.default_rng(seed)
+                    tf.random.set_seed(rng.integers(np.iinfo(int).max))
+                    scip_seed = rng.integers(2147483648)
 
-            for policy in branching_policies:
-                tf.set_random_seed(policy['seed'])
+                    # Solve using SCIP's default hybrid cut selector.
+                    model = scip.Model()
+                    init_scip(model, scip_seed, cpu_time=True)
+                    model.readProblem(f"{instance['path']}")
 
-                m = scip.Model()
-                m.setIntParam('display/verblevel', 0)
-                m.readProblem(f"{instance['path']}")
-                utilities.init_scip_params(m, seed=policy['seed'])
-                m.setIntParam('timing/clocktype', 1)  # 1: CPU user seconds, 2: wall clock time
-                m.setRealParam('limits/time', time_limit)
+                    # Start timers.
+                    wall_time = time.perf_counter()
+                    process_time = time.process_time()
 
-                brancher = PolicyBranching(policy)
-                m.includeBranchrule(branchrule=brancher, name=f"{policy['type']}:{policy['name']}",
-                                    desc=f"Custom PySCIPOpt branching policy.", priority=666666, maxdepth=-1,
-                                    maxbounddist=1)
+                    # Optimize the problem.
+                    model.optimize()
 
-                walltime = time.perf_counter()
-                proctime = time.process_time()
+                    # Record times.
+                    wall_time = time.perf_counter() - wall_time
+                    process_time = time.process_time() - process_time
 
-                m.optimize()
+                    # Record SCIP statistics.
+                    solve_time = model.getSolvingTime()
+                    n_nodes = model.getNNodes()
+                    n_lps = model.getNLPs()
+                    gap = model.getGap()
+                    status = model.getStatus()
 
-                walltime = time.perf_counter() - walltime
-                proctime = time.process_time() - proctime
+                    # Write results to a CSV file.
+                    writer.writerow({'selector': f"{policy['type']}:{policy['name']}", 'seed': policy['seed'],
+                                     'type': instance['type'], 'instance': instance['path'], 'nnodes': nnodes,
+                                     'nlps': nlps, 'stime': stime, 'gap': gap, 'status': status, 'ndomchgs': ndomchgs,
+                                     'ncutoffs': ncutoffs, 'walltime': walltime, 'proctime': proctime, })
 
-                stime = m.getSolvingTime()
-                nnodes = m.getNNodes()
-                nlps = m.getNLPs()
-                gap = m.getGap()
-                status = m.getStatus()
-                ndomchgs = brancher.ndomchgs
-                ncutoffs = brancher.ncutoffs
+                    csvfile.flush()
+                    m.freeProb()
 
-                writer.writerow(
-                    {'policy': f"{policy['type']}:{policy['name']}", 'seed': policy['seed'], 'type': instance['type'],
-                     'instance': instance['path'], 'nnodes': nnodes, 'nlps': nlps, 'stime': stime, 'gap': gap,
-                     'status': status, 'ndomchgs': ndomchgs, 'ncutoffs': ncutoffs, 'walltime': walltime,
-                     'proctime': proctime, })
-
-                csvfile.flush()
-                m.freeProb()
-
-                print(f"  {policy['type']}:{policy['name']} {policy['seed']} - {nnodes} ("
-                      f"{nnodes + 2 * (ndomchgs + ncutoffs)}) nodes {nlps} lps {stime:.2f} ({walltime:.2f} wall "
-                      f"{proctime:.2f} proc) s. {status}")
+                    print(f"  {policy['type']}:{policy['name']} {policy['seed']} - {nnodes} ("
+                          f"{nnodes + 2 * (ndomchgs + ncutoffs)}) nodes {nlps} lps {stime:.2f} ({walltime:.2f} wall "
+                          f"{proctime:.2f} proc) s. {status}")

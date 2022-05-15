@@ -15,10 +15,10 @@ from model_trainer import train_models
 
 def main():
     generate = False
-    collect = True
-    train = True
-    test = True
-    evaluate = True
+    collect = False
+    train = False
+    test = False
+    evaluate = False
     seed = 0
 
     n_jobs = cpu_count()
