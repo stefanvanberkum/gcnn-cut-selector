@@ -83,7 +83,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
 
     # Compute the dual solution value, normalized by the product of the row and objective norm.
     duals = np.array([model.getRowDualSol(row) for row in rows]) / (row_norms * obj_norm)
-    row_feats['dual'] = np.concatenate((-duals[has_lhs], +duals[has_rhs])).reshape(-1, 1)
+    row_feats['dual'] = np.concatenate((-duals[has_lhs], duals[has_rhs])).reshape(-1, 1)
 
     row_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
                       row_feats.items()]
@@ -143,12 +143,17 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     # Get the variable's value in the current LP solution.
     col_feats['lp_val'] = np.array([col.getVar().getLPSol() for col in cols]).reshape(-1, 1)
 
-    # Get the variable's value in the current primal solution.
-    col_feats['primal_val'] = np.array([col.getPrimsol() for col in cols]).reshape(-1, 1)
+    incumbent = model.getBestSol()
+    if incumbent is not None:
+        # Get the variable's value in the current primal solution.
+        col_feats['primal_val'] = np.array([model.getSolVal(incumbent, col.getVar()) for col in cols]).reshape(-1, 1)
 
-    # Compute the variable's average value over all primal solutions.
-    col_feats['avg_primal'] = np.mean([[model.getSolVal(sol, col.getVar()) for sol in model.getSols()] for col in cols],
-                                      axis=1).reshape(-1, 1)
+        # Compute the variable's average value over all primal solutions.
+        col_feats['avg_primal'] = np.mean(
+            [[model.getSolVal(sol, col.getVar()) for sol in model.getSols()] for col in cols], axis=1).reshape(-1, 1)
+    else:
+        col_feats['primal_val'] = np.zeros(n_cols).reshape(-1, 1)
+        col_feats['avg_primal'] = np.zeros(n_cols).reshape(-1, 1)
 
     col_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
                       col_feats.items()]
@@ -165,11 +170,12 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     cut_norms[cut_norms == 0] = 1
 
     # Retrieve the right-hand side of the cut (cuts of the form lhs <= d^T x are transformed to -d^T x <= -lhs).
-    # If the cut is of the form lhs <= d^T x <= rhs, we take the most binding side.
+    # If the cut is of the form lhs <= d^T x <= rhs, we take the most violated side.
     activity = np.array([model.getRowActivity(cut) for cut in cuts])
     lhs = np.array([cut.getLhs() for cut in cuts])
     rhs = np.array([cut.getRhs() for cut in cuts])
-    has_lhs = (activity - lhs) < (rhs - activity)
+    has_lhs = [not model.isInfinity(-val) for val in lhs]
+    has_lhs = np.logical_and(has_lhs, (lhs - activity) > (activity - rhs))
     has_rhs = np.logical_not(has_lhs)
 
     # Compute the right-hand side of each cut candidate, normalized by the cut norm.
@@ -177,24 +183,27 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
 
     # Compute each cut's support.
     support = np.array([cut.getNNonz() for cut in cuts]) / model.getNVars()
-    cut_feats['support'] = np.concatenate(support[has_lhs], support[has_rhs]).reshape(-1, 1)
+    cut_feats['support'] = np.concatenate((support[has_lhs], support[has_rhs])).reshape(-1, 1)
 
     # Compute each cut's integral support.
     n_int = np.array([model.getRowNumIntCols(cut) for cut in cuts])
     int_support = n_int / support
-    cut_feats['int_support'] = np.concatenate(int_support[has_lhs], int_support[has_rhs]).reshape(-1, 1)
+    cut_feats['int_support'] = np.concatenate((int_support[has_lhs], int_support[has_rhs])).reshape(-1, 1)
 
     # Compute each cut's efficacy.
     efficacy = np.array([model.getCutEfficacy(cut) for cut in cuts])
-    cut_feats['efficacy'] = np.concatenate(efficacy[has_lhs], efficacy[has_rhs]).reshape(-1, 1)
+    cut_feats['efficacy'] = np.concatenate((efficacy[has_lhs], efficacy[has_rhs])).reshape(-1, 1)
 
-    # Compute each cut's directed cutoff distance.
-    cutoff = np.array([model.getCutLPSolCutoffDistance(cut, model.getBestSol()) for cut in cuts])
-    cut_feats['cutoff'] = np.concatenate(cutoff[has_lhs], cutoff[has_rhs]).reshape(-1, 1)
+    if incumbent is not None:
+        # Compute each cut's directed cutoff distance.
+        cutoff = np.array([model.getCutLPSolCutoffDistance(cut, incumbent) for cut in cuts])
+        cut_feats['cutoff'] = np.concatenate((cutoff[has_lhs], cutoff[has_rhs])).reshape(-1, 1)
+    else:
+        cut_feats['cutoff'] = np.zeros(n_cuts).reshape(-1, 1)
 
     # Compute each cut's objective parallelism.
     parallelism = np.array([model.getRowObjParallelism(cut) for cut in cuts])
-    cut_feats['parallelism'] = np.concatenate(parallelism[has_lhs], parallelism[has_rhs]).reshape(-1, 1)
+    cut_feats['parallelism'] = np.concatenate((parallelism[has_lhs], parallelism[has_rhs])).reshape(-1, 1)
 
     cut_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
                       cut_feats.items()]
@@ -339,9 +348,9 @@ def load_batch(sample_files):
 
     # Concatenate all the feature matrices.
     cons_feats = np.concatenate(cons_feats, axis=0)
+    cons_edge_feats = np.concatenate(cons_edge_feats, axis=0)
     var_feats = np.concatenate(var_feats, axis=0)
     cut_feats = np.concatenate(cut_feats, axis=0)
-    cons_edge_feats = np.concatenate(cons_edge_feats, axis=0)
     cut_edge_feats = np.concatenate(cut_edge_feats, axis=0)
 
     # Concatenate and adjust the edge indices so that nodes in different samples get different indices.

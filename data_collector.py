@@ -138,9 +138,13 @@ class SamplingAgent(Cutsel):
 
         if not query_expert or not uneventful:
             # Fall back to a hybrid cut selection rule.
-            quality = [self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
-                cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(
-                cut) + 0.5 * self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in cuts]
+            if self.model.getBestSol() is not None:
+                quality = np.array([self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
+                    cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(
+                    cut) + 0.5 * self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in cuts])
+            else:
+                quality = np.array([1.5 * self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
+                    cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(cut) for cut in cuts])
 
         # Rank the cuts in descending order of quality.
         rankings = sorted(range(len(cuts)), key=lambda x: quality[x], reverse=True)
@@ -252,12 +256,15 @@ def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir
     seed_generator = np.random.default_rng(seed)
     seeds = seed_generator.integers(2 ** 32, size=3)
 
+    print("  - Collecting training samples...")
     rng = np.random.default_rng(seeds[0])
     collect_samples(train, out_dir + '/train', rng, n_train, n_jobs)
 
+    print("  - Collecting validation samples...")
     rng = np.random.default_rng(seeds[1])
     collect_samples(valid, out_dir + '/valid', rng, n_valid, n_jobs)
 
+    print("  - Collecting testing samples...")
     rng = np.random.default_rng(seeds[2])
     collect_samples(test, out_dir + '/test', rng, n_test, n_jobs)
 
@@ -296,7 +303,7 @@ def collect_samples(instances: list[str], out_dir: str, rng: np.random.Generator
     os.makedirs(tmp_dir, exist_ok=True)
 
     # Start dispatcher, which sends tasks to the in queue.
-    dispatcher = mp.Process(target=send_tasks, args=(task_queue, instances, rng.integers(2 ** 32), tmp_dir),
+    dispatcher = mp.Process(target=send_tasks, args=(task_queue, instances, tmp_dir, rng.integers(2 ** 32)),
                             daemon=True)
     dispatcher.start()
 
@@ -342,8 +349,8 @@ def collect_samples(instances: list[str], out_dir: str, rng: np.random.Generator
                     if i == n_samples:
                         buffer = {}
                         break
-        if i / n_samples > 0.1 * progress:
-            print(f"Progress: {progress}0%")
+        if i / n_samples >= 0.1 * progress:
+            print(f"    - Progress: {progress}0%")
             progress += 1
 
     # Stop all workers.

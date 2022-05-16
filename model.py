@@ -25,7 +25,7 @@ import pickle
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Model, Sequential
-from tensorflow.keras.initializers import constant
+from tensorflow.keras.initializers import Constant
 from tensorflow.keras.layers import Activation, Dense, Layer
 
 
@@ -168,7 +168,7 @@ class GCNN(BaseModel):
         self.emb_size = 64
         self.cons_feats = 4
         self.edge_feats = 1
-        self.var_feats = 9
+        self.var_feats = 14
         self.cut_feats = 6
 
         # Constraint embedding.
@@ -282,7 +282,7 @@ class GCNN(BaseModel):
 
         # Embeddings.
         cons_feats = self.cons_embedding(cons_feats)
-        cons_edge_feats = self.edge_embedding(cons_edge_feats)
+        cons_edge_feats = self.cons_edge_embedding(cons_edge_feats)
         var_feats = self.var_embedding(var_feats)
         cut_feats = self.cut_embedding(cut_feats)
         cut_edge_feats = self.cut_edge_embedding(cut_edge_feats)
@@ -328,15 +328,17 @@ class PreNormLayer(Layer):
 
         if shift:
             # Initialize a shifting weight for each input unit.
+            constant_init = Constant(value=0.0)
             self.shift = self.add_weight(name=f'{self.name}/shift', shape=(n_units,), trainable=False,
-                                         initializer=constant(value=np.zeros((n_units,)), dtype=tf.float32), )
+                                         initializer=constant_init)
         else:
             self.shift = None
 
         if scale:
             # Initialize a scaling weight for each input unit.
+            constant_init = Constant(value=1.0)
             self.scale = self.add_weight(name=f'{self.name}/scale', shape=(n_units,), trainable=False,
-                                         initializer=constant(value=np.ones((n_units,)), dtype=tf.float32), )
+                                         initializer=constant_init)
         else:
             self.scale = None
 

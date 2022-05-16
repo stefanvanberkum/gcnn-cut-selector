@@ -105,9 +105,13 @@ class CustomCutsel(Cutsel):
             quality = self.get_improvements(state, tf.convert_to_tensor(False)).numpy()
         else:
             # Use a hybrid cut selection rule.
-            quality = [self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
-                cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(
-                cut) + 0.5 * self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in cuts]
+            if self.model.getBestSol() is not None:
+                quality = np.array([self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
+                    cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(
+                    cut) + 0.5 * self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in cuts])
+            else:
+                quality = np.array([1.5 * self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
+                    cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(cut) for cut in cuts])
 
         # Rank the cuts in descending order of quality.
         rankings = sorted(range(len(cuts)), key=lambda x: quality[x], reverse=True)

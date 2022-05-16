@@ -85,15 +85,15 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     logfile = os.path.join(running_dir, 'log.txt')
 
     write_log(f"problem: {problem}", logfile)
-    write_log(f"seed {seed}", logfile)
+    write_log(f"seed: {seed}", logfile)
     write_log(f"max_epochs: {max_epochs}", logfile)
     write_log(f"epoch_size: {epoch_size}", logfile)
     write_log(f"batch_size: {batch_size}", logfile)
     write_log(f"pretrain_batch_size: {pretrain_batch_size}", logfile)
-    write_log(f"valid_batch_size : {valid_batch_size}", logfile)
+    write_log(f"valid_batch_size: {valid_batch_size}", logfile)
     write_log(f"lr: {lr}", logfile)
-    write_log(f"patience : {patience}", logfile)
-    write_log(f"early_stopping : {early_stopping}", logfile)
+    write_log(f"patience: {patience}", logfile)
+    write_log(f"early_stopping: {early_stopping}", logfile)
     write_log(f"fractions: {fractions}", logfile)
 
     rng = np.random.default_rng(seed)
@@ -195,7 +195,7 @@ def pretrain(model: GCNN, dataloader: tf.data.Dataset):
     :return: The number of prenorm layers that have been processed.
     """
 
-    model.pre_train_init()
+    model.pretrain_init()
     i = 0
     while True:
         # Prtrain the first prenorm layer that is still open for updates.
@@ -210,7 +210,7 @@ def pretrain(model: GCNN, dataloader: tf.data.Dataset):
                 break
 
         # Find the layer we just pretrained and turn off updating for this layer.
-        res = model.pre_train_next()
+        res = model.pretrain_next()
         if res is None:
             # We did not train anything, implying that no layers are left and that we are done.
             break
