@@ -42,7 +42,10 @@ from utils import get_state, init_scip
 class SamplingAgent(Cutsel):
     """Cut selector used for sampling expert (state, action) pairs.
 
-    This class extends PySCIPOpt's Cutsel class for user-defined cut selector plugins.
+    This class extends PySCIPOpt's Cutsel class for user-defined cut selector plugins. The selector implements an
+    expert decision rule based on bound improvement, and a hybrid cut selection rule as implemented in SCIP. One of
+    these strategies is used for ranking the cut candidates, depending on whether the expert is queried, after which
+    they are filtered using parallelism.
 
     Methods
     =======
@@ -78,11 +81,11 @@ class SamplingAgent(Cutsel):
     def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
         """Samples expert (state, action) pairs based on bound improvement.
 
-        Whenever the expert is not queried, the method falls back to hybrid cut selection rule.
+        Whenever the expert is not queried, the method falls back to a hybrid cut selection rule.
 
         :param cuts: A list of cut candidates.
         :param forcedcuts: A list of forced cuts, that are not subject to selection.
-        :param root: True if we are at the root node.
+        :param root: True if we are at the root node (not used).
         :param maxnselectedcuts: The maximum number of selected cuts.
         :return: A dictionary of the form {'cuts': np.array, 'nselectedcuts': int, 'result': SCIP_RESULT},
             where 'cuts' represent the resorted array of cuts in descending order of cut quality, 'nselectedcuts'

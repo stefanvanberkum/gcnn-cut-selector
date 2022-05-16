@@ -7,7 +7,7 @@ This module provides methods for testing a trained GCNN model. The methods in th
 Functions
 =========
 - :func:`test_models`: Tests the models in accordance with our testing scheme.
-- :func:`test_model`: Tests a trained model on testing data.
+- :func:`test_model`: Tests a trained model on testing data and writes the results to a CSV file.
 - :func:`process`: Runs the input data through a trained model.
 
 References
@@ -47,12 +47,12 @@ def test_models(seed: int):
 
 
 def test_model(problem: str, seeds: np.array, test_batch_size=128):
-    """Tests a trained model on testing data.
+    """Tests a trained model on testing data and writes the results to a CSV file.
 
     The accuracy on given fractions of the cut candidate ranking is written to a CSV file. That is, how often the
     model ranked the top x% of cut candidates correctly.
 
-    :param problem: The problem instance for which the model should be tested.
+    :param problem: The problem type to be considered, one of: {'setcov', 'combauc', 'capfac', or 'indset'}.
     :param seeds: A list of seeds that were used for training the models.
     :param test_batch_size: The number of samples in each testing batch.
     """
