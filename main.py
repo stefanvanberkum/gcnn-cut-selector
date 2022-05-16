@@ -9,6 +9,7 @@ from numpy.random import default_rng
 
 from data_collector import collect_data
 from instance_generator import generate_instances
+from model_evaluator import evaluate_models
 from model_tester import test_models
 from model_trainer import train_models
 
@@ -40,6 +41,10 @@ def main():
 
     if test:
         test_models(seeds[2])
+        print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
+
+    if evaluate:
+        evaluate_models(seeds[2])
         print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
 
 
