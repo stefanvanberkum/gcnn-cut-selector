@@ -644,7 +644,7 @@ def generate_capfac(n_customers: int, filepath: str, rng: np.random.Generator, n
     purpose, we first randomly place facilities and customers on a 1x1 surface and multiply the Euclidian distance
     between them by 10 to obtain unit cost of serving a customer from a particular facility. Then, demands are generated
     from :math:`U(5, 35)`. Capacities :math:`s_j` are generated from :math:`U(10, 160)` and the fixed costs are
-    using the formula :math:`U(0, 90) + U(100, 110) \cdot \sqrt{s_j}`, to reflect economies of scale. Finally,
+    using the formula :math:`U(0, 90) + U(100, 110) \\cdot \\sqrt{s_j}`, to reflect economies of scale. Finally,
     capacities are scaled to the desired capacity to demand ratio.
 
     References

@@ -186,7 +186,7 @@ def evaluate_problem(problem: str, seeds: np.array):
     - n_nodes: The number of nodes processed during solving.
     - n_lps: The number of LPs solved during solving.
     - solve_time: The solving time in CPU seconds.
-    - gap: The integrality gap, i.e., :math:`|(primal\_bound - dual\_bound)/\min(|primal\_bound|,|dual\_bound|)|`.
+    - gap: The integrality gap, i.e., :math:`|(primal\\_bound - dual\\_bound)/\\min(|primal\\_bound|,|dual\\_bound|)|`.
     - status: The solution status, 'optimal' if the problem was solved to optimality, 'timelimit' if the solving time
         exceeded one hour. Other status messages may be returned, but these should be disregarded in evaluation as
         solving times are not a fair representation of the performance in these cases (e.g., infeasible).
