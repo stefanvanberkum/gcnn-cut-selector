@@ -121,6 +121,7 @@ class SamplingAgent(Cutsel):
                 else:
                     # Do not record this (state, action) pair if SCIP couldn't solve one of the LPs to optimality.
                     uneventful = False
+                    self.model.endDive()
                     break
                 self.model.endDive()
 

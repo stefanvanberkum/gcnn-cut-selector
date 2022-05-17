@@ -15,14 +15,14 @@ from model_trainer import train_models
 
 
 def main():
-    generate = False
-    collect = False
-    train = False
-    test = False
-    evaluate = False
+    generate = True
+    collect = True
+    train = True
+    test = True
+    evaluate = True
     seed = 0
 
-    n_jobs = cpu_count()
+    n_jobs = cpu_count() - 6
     seed_generator = default_rng(seed)
     seeds = seed_generator.integers(2 ** 32, size=3)
     start_time = time()

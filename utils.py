@@ -264,6 +264,9 @@ def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_time=False):
     model.setIntParam('randomization/permutationseed', seed)
     model.setIntParam('randomization/randomseedshift', seed)
 
+    # Set branching rule to most infeasible branching.
+    model.setIntParam('branching/mostinf/priority', 5000000)
+
     # Disable presolver restarts.
     model.setIntParam('presolving/maxrestarts', 0)
 
