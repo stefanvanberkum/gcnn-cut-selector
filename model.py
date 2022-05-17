@@ -173,37 +173,40 @@ class GCNN(BaseModel):
 
         # Constraint embedding.
         self.cons_embedding = Sequential([PreNormLayer(n_units=self.cons_feats),
-                                          Dense(units=self.emb_size, activation='relu',
-                                                kernel_initializer='orthogonal'),
-                                          Dense(units=self.emb_size, activation='relu',
-                                                kernel_initializer='orthogonal')])
+                                          Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal',
+                                                name='cons_emb_1'),
+                                          Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal',
+                                                name='cons_emb_2')])
 
         # Constraint edge embedding.
         self.cons_edge_embedding = Sequential([PreNormLayer(self.edge_feats)])
 
         # Variable embedding.
         self.var_embedding = Sequential([PreNormLayer(n_units=self.var_feats),
-                                         Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
-                                         Dense(units=self.emb_size, activation='relu',
-                                               kernel_initializer='orthogonal')])
+                                         Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal',
+                                               name='var_emb_1'),
+                                         Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal',
+                                               name='var_emb_2')])
 
         # Cut candidate embedding.
         self.cut_embedding = Sequential([PreNormLayer(n_units=self.cut_feats),
-                                         Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
-                                         Dense(units=self.emb_size, activation='relu',
-                                               kernel_initializer='orthogonal')])
+                                         Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal',
+                                               name='cut_emb_1'),
+                                         Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal',
+                                               name='cut_emb_2')])
 
         # Cut edge embedding.
         self.cut_edge_embedding = Sequential([PreNormLayer(self.edge_feats)])
 
         # Graph convolutions.
-        self.conv_v_to_c = PartialGraphConvolution(self.emb_size, from_v=True)
-        self.conv_c_to_v = PartialGraphConvolution(self.emb_size)
-        self.conv_v_to_k = PartialGraphConvolution(self.emb_size, from_v=True)
+        self.conv_v_to_c = PartialGraphConvolution(self.emb_size, name='cons_conv', from_v=True)
+        self.conv_c_to_v = PartialGraphConvolution(self.emb_size, name='var_conv')
+        self.conv_v_to_k = PartialGraphConvolution(self.emb_size, name='cut_conv', from_v=True)
 
         # Output.
-        self.output_module = Sequential([Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
-                                         Dense(units=1, activation='relu', kernel_initializer='orthogonal')])
+        self.output_module = Sequential(
+            [Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal', name='out_1'),
+             Dense(units=1, activation='relu', kernel_initializer='orthogonal', name='out_2')])
 
         # Build the model right away.
         self.build([(None, self.cons_feats), (2, None), (None, self.edge_feats), (None, self.var_feats),
@@ -218,9 +221,10 @@ class GCNN(BaseModel):
                                  tf.TensorSpec(shape=[None, self.edge_feats], dtype=tf.float32),
                                  tf.TensorSpec(shape=[None, self.var_feats], dtype=tf.float32),
                                  tf.TensorSpec(shape=[None, self.cut_feats], dtype=tf.float32),
-                                 tf.TensorSpec(shape=[None], dtype=tf.int32),
-                                 tf.TensorSpec(shape=[None], dtype=tf.int32),
-                                 tf.TensorSpec(shape=[None], dtype=tf.int32)), tf.TensorSpec(shape=[], dtype=tf.bool)]
+                                 tf.TensorSpec(shape=[2, None], dtype=tf.int32),
+                                 tf.TensorSpec(shape=[None, self.edge_feats], dtype=tf.float32),
+                                 tf.TensorSpec(shape=[], dtype=tf.int32), tf.TensorSpec(shape=[], dtype=tf.int32),
+                                 tf.TensorSpec(shape=[], dtype=tf.int32)), tf.TensorSpec(shape=[], dtype=tf.bool)]
 
     def build(self, input_shapes: list):
         """Builds the model.
@@ -466,6 +470,7 @@ class PartialGraphConvolution(Model):
     - :meth:`call`: Calls the model on inputs and returns outputs.
 
     :ivar emb_size: The embedding size of each feature vector.
+    :ivar name: The name of this convolution.
     :ivar from_v: True if the message is passed from the variables to either the constraints or cut candidates.
     :ivar feature_module_left: A 64-node layer, which applies a weighted sum with bias to the input.
     :ivar feature_module_edge: A 64-node layer, which applies a weighted sum to the input.
@@ -476,32 +481,35 @@ class PartialGraphConvolution(Model):
     :ivar output_module: Two 64-node layers with ReLU activation.
     """
 
-    def __init__(self, emb_size: int, from_v=False):
+    def __init__(self, emb_size: int, name: str, from_v=False):
         super().__init__()
         self.emb_size = emb_size
         self.from_v = from_v
 
         # Feature modules (essentially weighted sums).
-        self.feature_module_left = Sequential(
-            [Dense(units=self.emb_size, activation=None, use_bias=True, kernel_initializer='orthogonal')])
+        self.feature_module_left = Sequential([
+            Dense(units=self.emb_size, activation=None, use_bias=True, kernel_initializer='orthogonal',
+                  name=f'{name}_feat_left')])
 
-        self.feature_module_edge = Sequential(
-            [Dense(units=self.emb_size, activation=None, use_bias=False, kernel_initializer='orthogonal')])
+        self.feature_module_edge = Sequential([
+            Dense(units=self.emb_size, activation=None, use_bias=False, kernel_initializer='orthogonal',
+                  name=f'{name}_feat_edge')])
 
-        self.feature_module_right = Sequential(
-            [Dense(units=self.emb_size, activation=None, use_bias=False, kernel_initializer='orthogonal')])
+        self.feature_module_right = Sequential([
+            Dense(units=self.emb_size, activation=None, use_bias=False, kernel_initializer='orthogonal',
+                  name=f'{name}_feat_right')])
 
         self.feature_module_final = Sequential([PreNormLayer(1, shift=False), Activation('relu'),
                                                 Dense(units=self.emb_size, activation=None,
-                                                      kernel_initializer='orthogonal')])
+                                                      kernel_initializer='orthogonal', name=f'{name}_feat_final')])
 
         # Scaling operation.
         self.post_conv_module = Sequential([PreNormLayer(1, shift=False)])
 
         # Output layer.
-        self.output_module = Sequential([Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal'),
-                                         Dense(units=self.emb_size, activation='relu',
-                                               kernel_initializer='orthogonal')])
+        self.output_module = Sequential(
+            [Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal', name=f'{name}_out_1'),
+             Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal', name=f'{name}_out_2')])
 
     def build(self, input_shapes):
         """Builds the model.

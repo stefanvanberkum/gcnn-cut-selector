@@ -186,8 +186,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     cut_feats['support'] = np.concatenate((support[has_lhs], support[has_rhs])).reshape(-1, 1)
 
     # Compute each cut's integral support.
-    n_int = np.array([model.getRowNumIntCols(cut) for cut in cuts])
-    int_support = n_int / support
+    int_support = np.array([model.getRowNumIntCols(cut) / cut.getNNonz() for cut in cuts])
     cut_feats['int_support'] = np.concatenate((int_support[has_lhs], int_support[has_rhs])).reshape(-1, 1)
 
     # Compute each cut's efficacy.
@@ -354,7 +353,7 @@ def load_batch(sample_files):
     cut_edge_feats = np.concatenate(cut_edge_feats, axis=0)
 
     # Concatenate and adjust the edge indices so that nodes in different samples get different indices.
-    # [[0, n_cons_1, n_cons_1 + n_cons_2, ...], [0, n_var_1, n_var_1 + n_var_2, ...]]
+    # cons_shift = [[0, n_cons_1, n_cons_1 + n_cons_2, ...], [0, n_var_1, n_var_1 + n_var_2, ...]].
     cons_shift = np.cumsum([[0] + n_cons[:-1], [0] + n_vars[:-1]], axis=1)
     cons_edge_inds = np.concatenate([e_ind + cons_shift[:, j:(j + 1)] for j, e_ind in enumerate(cons_edge_inds)],
                                     axis=1)

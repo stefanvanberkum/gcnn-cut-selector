@@ -151,13 +151,13 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
             train_data = train_data.prefetch(1)
 
             # Train the model.
-            train_loss, train_acc = process(model, train_data, fractions, optimizer, loss_fn)
-            write_log(f"TRAIN LOSS: {train_loss:.3f} " + "".join(
+            train_loss, train_acc = process(model, train_data, fractions, loss_fn, optimizer)
+            write_log(f"TRAIN LOSS: {train_loss:.3e} " + "".join(
                 [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, train_acc)]), logfile)
 
         # Test the model on the validation set.
-        valid_loss, valid_acc = process(model, valid_data, fractions)
-        write_log(f"VALID LOSS: {valid_loss:.3f} " + "".join(
+        valid_loss, valid_acc = process(model, valid_data, fractions, loss_fn)
+        write_log(f"VALID LOSS: {valid_loss:.3e} " + "".join(
             [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
 
         if valid_loss < best_loss:
@@ -177,8 +177,8 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
                 write_log(f"  {plateau_count} epochs without improvement, decreasing learning rate to {lr}", logfile)
 
     model.restore_state(os.path.join(running_dir, 'best_params.pkl'))
-    valid_loss, valid_acc = process(model, valid_data, fractions)
-    write_log(f"BEST VALID LOSS: {valid_loss:.3f} " + "".join(
+    valid_loss, valid_acc = process(model, valid_data, fractions, loss_fn)
+    write_log(f"BEST VALID LOSS: {valid_loss:.3e} " + "".join(
         [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
 
 
@@ -202,8 +202,12 @@ def pretrain(model: GCNN, dataloader: tf.data.Dataset):
         for batch in dataloader:
             (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
              n_vars, n_cuts, _) = batch
+
+            n_cons_total = tf.reduce_sum(n_cons)
+            n_vars_total = tf.reduce_sum(n_vars)
+            n_cuts_total = tf.reduce_sum(n_cuts)
             batched_states = cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, \
-                             cut_edge_feats, n_cons, n_vars, n_cuts
+                             cut_edge_feats, n_cons_total, n_vars_total, n_cuts_total
 
             if not model.pretrain(batched_states, tf.convert_to_tensor(True)):
                 # No layer receives any updates anymore.
@@ -219,14 +223,14 @@ def pretrain(model: GCNN, dataloader: tf.data.Dataset):
     return i
 
 
-def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, optimizer=None, loss_fn=None):
+def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, loss_fn, optimizer=None):
     """Runs the input data through a model, training it if an optimizer is provided.
 
     :param model: The model.
     :param dataloader: The input dataset to process.
     :param fractions: A list of fractions to compute the accuracy over (top x% correct).
+    :param loss_fn: The loss function to be used for the model.
     :param optimizer: An optional optimizer used for training the model.
-    :param loss_fn: An optional loss function used for training the model.
     :return: The mean loss and accuracy over the input data.
     """
 
@@ -250,8 +254,8 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, optim
             with tf.GradientTape() as tape:
                 predictions = model(batched_states, tf.convert_to_tensor(True))
                 loss = loss_fn(improvements, predictions)
-            grads = tape.gradient(target=loss, sources=model.variables)
-            optimizer.apply_gradients(zip(grads, model.variables))
+            grads = tape.gradient(target=loss, sources=model.trainable_variables)
+            optimizer.apply_gradients(zip(grads, model.trainable_variables))
         else:
             # Evaluate the model.
             predictions = model(batched_states, tf.convert_to_tensor(False))

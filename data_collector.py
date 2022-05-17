@@ -113,13 +113,13 @@ class SamplingAgent(Cutsel):
                 # Make sure that the LP bound is feasible.
                 quality[i] = -np.Inf
                 solstat = self.model.getLPSolstat()
-                if solstat != SCIP_LPSOLSTAT.ITERLIMIT and solstat != SCIP_LPSOLSTAT.TIMELIMIT:
+                if solstat == SCIP_LPSOLSTAT.OPTIMAL:
                     cut_bound = self.model.getLPObjVal()
 
                     # Compute the relative bound improvement.
                     quality[i] = abs(bound - cut_bound) / abs(bound)
                 else:
-                    # Do not record this (state, action) pair if SCIP hit a limit during solving.
+                    # Do not record this (state, action) pair if SCIP couldn't solve one of the LPs to optimality.
                     uneventful = False
                     break
                 self.model.endDive()
