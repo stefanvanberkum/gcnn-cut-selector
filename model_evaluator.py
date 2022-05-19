@@ -23,17 +23,17 @@ References
 
 import csv
 import os
+from multiprocessing import Process, Queue
 from time import perf_counter, process_time
 
 import numpy as np
 import pyscipopt as scip
 import tensorflow as tf
-from numpy.random import default_rng
 from pyscipopt import SCIP_RESULT
 from pyscipopt.scip import Cutsel
 
 from model import GCNN
-from utils import get_state, init_scip
+from utils import get_state, init_scip, load_seeds
 
 
 class CustomCutsel(Cutsel):
@@ -161,31 +161,18 @@ class CustomCutsel(Cutsel):
         return {'cuts': sorted_cuts, 'nselectedcuts': min(n_selected, maxnselectedcuts), 'result': SCIP_RESULT.SUCCESS}
 
 
-def evaluate_models(seed: int):
-    """Evaluates the models in accordance with our evaluation scheme.
+def evaluate_models(n_jobs: int):
+    """Evaluates the models in accordance with our evaluation scheme and writes the results to a CSV file.
 
-    :param seed: The same seed value that was used to train the models.
-    """
-
-    seed_generator = default_rng(seed)
-    seeds = seed_generator.integers(2 ** 32, size=5)
-
-    print("Evaluating models...")
-    evaluate_problem('setcov', seeds)
-    evaluate_problem('combauc', seeds)
-    evaluate_problem('capfac', seeds)
-    evaluate_problem('indset', seeds)
-    print("Done!")
-
-
-def evaluate_problem(problem: str, seeds: np.array):
-    """Evaluates trained models on a given problem type and writes the results to a CSV file.
+    The instance generation is parallelized over multiple cores. Tasks are first sent to a queue, and then processed
+    by the workers.
 
     The CSV file contains the following information:
 
-    - selector: The cut selector used, either 'hybrid' or 'gcnn'.
-    - difficulty: The difficulty level of the instance evaluated, one of {'easy', 'medium', 'hard'}.
+    - problem: The problem type of the evaluated instance, one of {'setcov', 'combauc', 'capfac', 'indset'}.
+    - difficulty: The difficulty level of the evaluated instance, one of {'easy', 'medium', 'hard'}.
     - instance: The instance number considered.
+    - selector: The cut selector used, either 'hybrid' or 'gcnn'.
     - seed: The seed value that was used to train the model.
     - n_nodes: The number of nodes processed during solving.
     - n_lps: The number of LPs solved during solving.
@@ -198,87 +185,137 @@ def evaluate_problem(problem: str, seeds: np.array):
     - process_time: The elapsed process time during solving, i.e., the sum of system and user CPU time of the current
     process.
 
-    :param problem: The problem type to be considered, one of: {'setcov', 'combauc', 'capfac', or 'indset'}.
-    :param seeds: A list of seeds that were used for training the models.
+    :param n_jobs: The number of jobs to run in parallel.
     """
 
-    setcov_folders = ['setcov/eval_500r', 'setcov/eval_1000r', 'setcov/eval_2000r']
-    combauc_folders = ['combauc/eval_100i_500b', 'combauc/eval_200i_1000b', 'combauc/eval_300i_1500b']
-    capfac_folders = ['capfac/eval_100c', 'capfac/eval_200c', 'capfac/eval_400c']
-    indset_folders = ['indset/eval_500n', 'indset/eval_1000n', 'indset/eval_1500n']
+    print("Evaluating models...")
+
+    setcov_folders = {'easy': 'setcov/eval_500r', 'medium': 'setcov/eval_1000r', 'hard': 'setcov/eval_2000r'}
+    combauc_folders = {'easy': 'combauc/eval_100i_500b', 'medium': 'combauc/eval_200i_1000b',
+                       'hard': 'combauc/eval_300i_1500b'}
+    capfac_folders = {'easy': 'capfac/eval_100c', 'medium': 'capfac/eval_200c', 'hard': 'capfac/eval_400c'}
+    indset_folders = {'easy': 'indset/eval_500n', 'medium': 'indset/eval_1000n', 'hard': 'indset/eval_1500n'}
     folders = {'setcov': setcov_folders, 'combauc': combauc_folders, 'capfac': capfac_folders, 'indset': indset_folders}
-    problem_folders = folders[problem]
 
     os.makedirs('results', exist_ok=True)
-    result_file = f"results/{problem}_eval.csv"
 
-    # Retrieve evaluation instances.
-    instances = []
-
-    instances += [
-        {'difficulty': 'easy', 'instance': i + 1, 'path': f"data/instances/{problem_folders[0]}/instance_{i + 1}.lp"}
-        for i in range(20)]
-    instances += [
-        {'difficulty': 'medium', 'instance': i + 1, 'path': f"data/instances/{problem_folders[1]}/instance_{i + 1}.lp"}
-        for i in range(20)]
-    instances += [
-        {'difficulty': 'hard', 'instance': i + 1, 'path': f"data/instances/{problem_folders[2]}/instance_{i + 1}.lp"}
-        for i in range(20)]
-
+    difficulties = ['hard', 'medium', 'easy']
+    problems = ['setcov', 'combauc', 'capfac', 'indset']
     cut_selectors = ['hybrid', 'gcnn']
+    seeds = load_seeds()
 
+    # Schedule jobs (hard to easy in order to minimize the number of idle CPU cores).
+    task_queue = Queue()
+    for difficulty in difficulties:
+        for problem in problems:
+            problem_folders = folders[problem]
+            folder = problem_folders[difficulty]
+            instances = [{'number': i + 1, 'path': f"data/instances/{folder}/instance_{i + 1}.lp"} for i in range(20)]
+            for instance in instances:
+                for selector in cut_selectors:
+                    for seed in seeds:
+                        task_queue.put((problem, difficulty, instance['number'], instance['path'], selector, seed))
+
+    # Append worker termination signals to the queue.
+    for i in range(n_jobs):
+        task_queue.put({'problem': 'done'})
+
+    # Start workers and tell them to process orders from the task queue.
+    out_queue = Queue()
+    workers = []
+    for i in range(n_jobs):
+        worker = Process(target=process_tasks, args=(task_queue, out_queue), daemon=True)
+        workers.append(worker)
+        worker.start()
+
+    # Wait for all workers to finish.
+    for worker in workers:
+        worker.join()
+
+    # Append an end message to the queue.
+    out_queue.put({'problem': 'end'})
+
+    # Write the results to a CSV file.
     fieldnames = ['selector', 'difficulty', 'instance', 'seed', 'n_nodes', 'n_lps', 'solve_time', 'gap', 'status',
                   'wall_time', 'process_time']
-    with open(result_file, 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    with open('/results/eval.csv', 'w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
 
-        for instance in instances:
-            for selector in cut_selectors:
-                for seed in seeds:
-                    rng = np.random.default_rng(seed)
-                    tf.random.set_seed(rng.integers(np.iinfo(int).max))
-                    scip_seed = rng.integers(2147483648)
+        while True:
+            # Fetch a result from the queue.
+            result = out_queue.get()
+            if result['problem'] == 'end':
+                # We have reached the end of the queue.
+                break
 
-                    # Initialize model.
-                    model = scip.Model()
-                    init_scip(model, scip_seed, cpu_time=True)
-                    model.readProblem(f"{instance['path']}")
+            (problem, difficulty, instance, selector, seed, n_nodes, n_lps, solve_time, gap, status, wall_time,
+             proc_time) = result
+            writer.writerow(
+                {'problem': problem, 'difficulty': difficulty, 'instance': instance, 'selector': selector, 'seed': seed,
+                 'n_nodes': n_nodes, 'n_lps': n_lps, 'solve_time': solve_time, 'gap': gap, 'status': status,
+                 'wall_time': wall_time, 'process_time': proc_time})
+    print("Done!")
 
-                    if selector == 'hybrid':
-                        # Solve using the hybrid cut selector.
-                        cut_selector = CustomCutsel()
-                        model.includeCutsel(cut_selector, 'hybrid cut selector',
-                                            'selects cuts based on weighted average of quality metrics', 5000000)
-                    else:
-                        # Solve using our GCNN cut selector.
-                        gcnn = GCNN().restore_state(f'trained_models/{problem}/{seed}/best_params.pkl')
-                        cut_selector = CustomCutsel(gcnn=gcnn)
-                        model.includeCutsel(cut_selector, 'GCNN cut selector',
-                                            'selects cuts based on estimated bound improvement', 5000000)
 
-                    # Start timers.
-                    wall_time = perf_counter()
-                    proc_time = process_time()
+def process_tasks(task_queue: Queue, out_queue: Queue):
+    """Worker loop: fetch a task and evaluate the given model on the given evaluation instance.
 
-                    # Optimize the problem.
-                    model.optimize()
+    :param task_queue: The task queue from which the worker needs to fetch tasks.
+    :param out_queue: The out queue to which the worker should send results.
+    """
 
-                    # Record times.
-                    wall_time = perf_counter() - wall_time
-                    proc_time = process_time() - proc_time
+    while True:
+        # Fetch a task.
+        task = task_queue.get()
 
-                    # Record SCIP statistics.
-                    solve_time = model.getSolvingTime()
-                    n_nodes = model.getNNodes()
-                    n_lps = model.getNLPs()
-                    gap = model.getGap()
-                    status = model.getStatus()
+        if task['problem'] == 'done':
+            # This worker is done.
+            break
 
-                    # Write results to a CSV file.
-                    writer.writerow(
-                        {'selector': selector, 'difficulty': instance['difficulty'], 'instance': instance['instance'],
-                         'seed': seed, 'n_nodes': n_nodes, 'n_lps': n_lps, 'solve_time': solve_time, 'gap': gap,
-                         'status': status, 'wall_time': wall_time, 'process_time': proc_time})
-                    csvfile.flush()
-                    model.freeProb()
+        problem, difficulty, instance, path, selector, seed = task
+
+        rng = np.random.default_rng(seed)
+        tf.random.set_seed(rng.integers(np.iinfo(int).max))
+        scip_seed = rng.integers(2147483648)
+
+        # Initialize model.
+        model = scip.Model()
+        init_scip(model, scip_seed, cpu_time=True)
+        model.readProblem(path)
+
+        if selector == 'hybrid':
+            # Solve using the hybrid cut selector.
+            cut_selector = CustomCutsel()
+            model.includeCutsel(cut_selector, 'hybrid cut selector',
+                                'selects cuts based on weighted average of quality metrics', 5000000)
+        else:
+            # Solve using our GCNN cut selector.
+            gcnn = GCNN().restore_state(f'trained_models/{problem}/{seed}/best_params.pkl')
+            cut_selector = CustomCutsel(gcnn=gcnn)
+            model.includeCutsel(cut_selector, 'GCNN cut selector', 'selects cuts based on estimated bound improvement',
+                                5000000)
+
+        # Start timers.
+        wall_time = perf_counter()
+        proc_time = process_time()
+
+        # Optimize the problem.
+        model.optimize()
+
+        # Record times.
+        wall_time = perf_counter() - wall_time
+        proc_time = process_time() - proc_time
+
+        # Record SCIP statistics.
+        solve_time = model.getSolvingTime()
+        n_nodes = model.getNNodes()
+        n_lps = model.getNLPs()
+        gap = model.getGap()
+        status = model.getStatus()
+
+        # Send result to the out queue.
+        out_queue.put((
+            problem, difficulty, instance, selector, seed, n_nodes, n_lps, solve_time, gap, status, wall_time,
+            proc_time))
+        model.freeProb()
