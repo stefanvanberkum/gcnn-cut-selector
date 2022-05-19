@@ -23,20 +23,15 @@ import pathlib
 
 import numpy as np
 import tensorflow as tf
-from numpy.random import default_rng
 
 from model import GCNN
-from utils import load_batch_tf
+from utils import load_batch_tf, load_seeds
 
 
-def test_models(seed: int):
-    """Tests the models in accordance with our testing scheme.
+def test_models():
+    """Tests the models in accordance with our testing scheme."""
 
-    :param seed: The same seed value that was used to train the models.
-    """
-
-    seed_generator = default_rng(seed)
-    seeds = seed_generator.integers(2 ** 32, size=5)
+    seeds = load_seeds()
 
     print("Testing models...")
     test_model('setcov', seeds)
@@ -71,8 +66,8 @@ def test_model(problem: str, seeds: np.array, test_batch_size=128):
     test_files = [str(x) for x in test_files]
 
     fieldnames = ['seed', ] + [f'{100 * frac:.0f}%' for frac in fractions]
-    with open(result_file, 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    with open(result_file, 'w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
 
         for seed in seeds:
@@ -94,7 +89,7 @@ def test_model(problem: str, seeds: np.array, test_batch_size=128):
 
             test_acc = process(model, test_data, fractions)
             writer.writerow({'seed': seed, **{f'{100 * k:.0f}%': test_acc[i] for i, k in enumerate(fractions)}})
-            csvfile.flush()
+            file.flush()
 
 
 def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):

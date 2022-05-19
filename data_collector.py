@@ -273,8 +273,8 @@ def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir
     test_stats = collect_samples(test, n_test, n_jobs, out_dir + '/test', rng)
 
     fieldnames = ['set', 'n_total', 'n_unique']
-    with open(out_dir + "/stats.csv", 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    with open(out_dir + "/stats.csv", 'w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerow({'set': 'train', 'n_total': train_stats[0], 'n_unique': train_stats[1]})
         writer.writerow({'set': 'valid', 'n_total': valid_stats[0], 'n_unique': valid_stats[1]})
@@ -303,7 +303,7 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # Start workers, which process orders from the task queue and send samples to the out queue.
+    # Start workers, and tell them to process orders from the task queue and send samples to the out queue.
     task_queue = Queue(maxsize=2 * n_jobs)
     out_queue = SimpleQueue()
     workers = []
@@ -398,7 +398,7 @@ def send_tasks(task_queue, instances, out_dir, seed):
     while True:
         instance = rng.choice(instances)
         seed = rng.integers(2 ** 32)
-        task_queue.put([episode, instance, out_dir, seed])
+        task_queue.put((episode, instance, out_dir, seed))
         episode += 1
 
 

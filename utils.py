@@ -19,7 +19,6 @@ References
     graph convolutional neural networks. *Neural Information Processing Systems (NeurIPS 2019)*, 15580–15592.
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
-
 import datetime
 import gzip
 import pickle
@@ -277,6 +276,34 @@ def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_time=False):
     model.setRealParam('limits/time', 3600)
     if cpu_time:
         model.setIntParam('timing/clocktype', 1)
+
+
+def generate_seeds(seed: int):
+    """Generates five seeds for model training, testing, and evaluation.
+
+    The seeds are stored to both a pickle and CSV file.
+
+    :param seed: The seed value used to generate random seeds.
+    """
+
+    seed_generator = np.random.default_rng(seed)
+    seeds = seed_generator.integers(2 ** 32, size=5)
+
+    with open('/seeds/seeds.pkl', 'wb') as file:
+        pickle.dump(seeds, file)
+    with open('/seeds/seeds.csv', 'w') as file:
+        print(*seeds, sep=',', file=file)
+
+
+def load_seeds():
+    """Loads the previously generated seeds.
+
+    :return: A numpy array of five seeds.
+    """
+
+    with gzip.open('/seeds/seeds.pkl', 'rb') as file:
+        seeds = pickle.load(file)
+    return seeds
 
 
 def load_batch_tf(x):

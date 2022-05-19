@@ -186,8 +186,8 @@ def generate_instances(n_jobs: int, seed: int):
         - Medium evaluation: 1000 nodes.
         - Hard evaluation: 1500 nodes.
 
-    The instance generation is parallelized over multiple cores. A dispatcher sends tasks to a task queue,
-    which are then processed by the workers.
+    The instance generation is parallelized over multiple cores. Tasks are first sent to a queue, and then processed
+    by the workers.
 
     :param n_jobs: The number of jobs to run in parallel.
     :param seed: A seed value for the random number generator.
@@ -196,18 +196,29 @@ def generate_instances(n_jobs: int, seed: int):
     print("Generating instances...")
     make_dirs()
 
-    # Start workers, which process orders from the task queue.
-    task_queue = Queue(maxsize=2 * n_jobs)
+    problems = ['setcov', 'combauc', 'capfac', 'indset']
+    datasets = ['train', 'valid', 'test', 'easy', 'medium', 'hard']
+    n_instances = {'train': 10000, 'valid': 2000, 'test': 2000, 'easy': 20, 'medium': 20, 'hard': 20}
+    rng = np.random.default_rng(seed)
+
+    # Schedule jobs.
+    task_queue = Queue()
+    for problem in problems:
+        for dataset in datasets:
+            for i in range(n_instances[dataset]):
+                task_queue.put(
+                    {'problem': problem, 'dataset': dataset, 'number': i + 1, 'seed': rng.integers(np.iinfo(int).max)})
+
+    # Append worker termination signals to the queue.
+    for worker in range(n_jobs):
+        task_queue.put({'problem': 'done'})
+
+    # Start workers and tell them to process orders from the task queue.
     workers = []
     for i in range(n_jobs):
         worker = Process(target=process_tasks, args=(task_queue,), daemon=True)
         workers.append(worker)
         worker.start()
-
-    # Start dispatcher, which sends tasks to the task queue.
-    dispatcher = Process(target=send_tasks, args=(task_queue, n_jobs, seed), daemon=True)
-    dispatcher.start()
-    dispatcher.join()
 
     # Wait for all workers to finish.
     for worker in workers:
@@ -244,34 +255,8 @@ def make_dirs():
         os.makedirs(f'data/instances/indset/{name}_{nodes}n')
 
 
-def send_tasks(task_queue: Queue, n_jobs: int, seed: int):
-    """Dispatcher loop: continuously send tasks to the task queue.
-
-    This loop relies on limited queue capacity, as it continuously sends tasks.
-
-    :param task_queue: he task queue to send tasks to.
-    :param n_jobs: The number of jobs to run in parallel.
-    :param seed: A seed value for the random number generator.
-    """
-
-    problems = ['setcov', 'combauc', 'capfac', 'indset']
-    datasets = ['train', 'valid', 'test', 'easy', 'medium', 'hard']
-    n_instances = {'train': 10000, 'valid': 2000, 'test': 2000, 'easy': 20, 'medium': 20, 'hard': 20}
-    rng = np.random.default_rng(seed)
-
-    for problem in problems:
-        for dataset in datasets:
-            for i in range(n_instances[dataset]):
-                task_queue.put(
-                    {'problem': problem, 'dataset': dataset, 'number': i + 1, 'seed': rng.integers(np.iinfo(int).max)})
-
-    # Signal to the workers that we are done.
-    for worker in range(n_jobs):
-        task_queue.put({'problem': 'done'})
-
-
 def process_tasks(task_queue: Queue):
-    """Worker loop: fetch an task and generate the corresponding instance.
+    """Worker loop: fetch a task and generate the corresponding instance.
 
     :param task_queue: The task queue from which the worker needs to fetch tasks.
     """

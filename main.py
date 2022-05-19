@@ -12,6 +12,7 @@ from instance_generator import generate_instances
 from model_evaluator import evaluate_models
 from model_tester import test_models
 from model_trainer import train_models
+from utils import generate_seeds
 
 
 def main():
@@ -36,15 +37,16 @@ def main():
         print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
 
     if train:
-        train_models(seeds[2])
+        generate_seeds(seeds[2])
+        train_models()
         print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
 
     if test:
-        test_models(seeds[2])
+        test_models()
         print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
 
     if evaluate:
-        evaluate_models(seeds[2])
+        evaluate_models(n_jobs)
         print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
 
 

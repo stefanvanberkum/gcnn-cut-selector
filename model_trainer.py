@@ -17,29 +17,23 @@ References
     graph convolutional neural networks. *Neural Information Processing Systems (NeurIPS 2019)*, 15580–15592.
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
-
 import os
 import pathlib
 from time import perf_counter
 
 import numpy as np
 import tensorflow as tf
-from numpy.random import default_rng
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.optimizers import Adam
 
 from model import GCNN
-from utils import load_batch_tf, write_log
+from utils import load_batch_tf, load_seeds, write_log
 
 
-def train_models(seed: int):
-    """Trains the models in accordance with our training scheme.
+def train_models():
+    """Trains the models in accordance with our training scheme."""
 
-    :param seed: A seed value for the random number generator.
-    """
-
-    seed_generator = default_rng(seed)
-    seeds = seed_generator.integers(2 ** 32, size=5)
+    seeds = load_seeds()
 
     print("Training models...")
     for i in range(5):
