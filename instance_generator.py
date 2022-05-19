@@ -25,6 +25,7 @@ References
 
 import os
 from itertools import combinations
+from multiprocessing import Process, Queue
 
 import numpy as np
 import scipy.sparse
@@ -154,90 +155,168 @@ class Graph:
         return Graph(n_nodes, edges, degrees, neighbors)
 
 
-def generate_instances(seed: int):
-    """Generates set covering, combinatorial auction, capacitated facility location, and independent set problem
+def generate_instances(n_jobs: int, seed: int):
+    """Generate set covering, combinatorial auction, capacitated facility location, and independent set problem
     instances in accordance with our data generation scheme.
 
+    For each problem type, this method generates 10000 samples for training, 2000 for evaluation, 2000 for testing,
+    and 20 for each difficulty level (easy, medium, and hard). The dimensions of the generated problems are as follows:
+
+    - Set covering:
+
+        - Training, validation, testing, and easy evaluation: 500 rows, 1000 columns.
+        - Medium evaluation: 1000 rows, 1000 columns.
+        - Hard evaluation: 2000 rows, 1000 columns.
+
+    - Combinatorial auction:
+
+        - Training, validation, testing, and easy evaluation: 100 items, 500 bids.
+        - Medium evaluation: 200 items, 1000 bids.
+        - Hard evaluation: 300 items, 1500 bids.
+
+    - Capacitated facility:
+
+        - Training, validation, testing, and easy evaluation: 100 customers, 100 facilities.
+        - Medium evaluation: 200 customers, 100 facilities.
+        - Hard evaluation: 400 customers, 100 facilities.
+
+    - Maximum independent set:
+
+        - Training, validation, testing, and easy evaluation: 500 nodes.
+        - Medium evaluation: 1000 nodes.
+        - Hard evaluation: 1500 nodes.
+
+    The instance generation is parallelized over multiple cores. A dispatcher sends tasks to a task queue,
+    which are then processed by the workers.
+
+    :param n_jobs: The number of jobs to run in parallel.
     :param seed: A seed value for the random number generator.
     """
 
     print("Generating instances...")
-    rng = np.random.default_rng(seed)
-    generate_setcovs(rng)
-    generate_combaucs(rng)
-    generate_capfacs(rng)
-    generate_indsets(rng)
+    make_dirs()
+
+    # Start workers, which process orders from the task queue.
+    task_queue = Queue(maxsize=2 * n_jobs)
+    workers = []
+    for i in range(n_jobs):
+        worker = Process(target=process_tasks, args=(task_queue,), daemon=True)
+        workers.append(worker)
+        worker.start()
+
+    # Start dispatcher, which sends tasks to the task queue.
+    dispatcher = Process(target=send_tasks, args=(task_queue, n_jobs, seed), daemon=True)
+    dispatcher.start()
+    dispatcher.join()
+
+    # Wait for all workers to finish.
+    for worker in workers:
+        worker.join()
     print("Done!")
 
 
-def generate_setcovs(rng: np.random.Generator):
-    """Generates set covering problem instances in accordance with our data generation scheme.
+def make_dirs():
+    """Create all directories."""
 
-    This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (500x1000).
-    Moreover, it generates three set of 100 instances each for evaluation, with dimensions 500x1000 (Easy),
-    1000x1000 (Medium), and 2000x1000 (Hard).
+    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 2000}
+    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 200, 'hard': 300}
+    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 1500}
+    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 200, 'hard': 400}
+    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 1500}
 
-    :param rng: A random number generator.
+    for dataset in n_rows.keys():
+        if dataset == 'easy' or dataset == 'medium' or dataset == 'hard':
+            name = 'eval'
+        else:
+            name = dataset
+
+        rows = n_rows[dataset]
+        os.makedirs(f'data/instances/setcov/{name}_{rows}r')
+
+        items = n_items[dataset]
+        bids = n_bids[dataset]
+        os.makedirs(f'data/instances/combauc/{name}_{items}i_{bids}b')
+
+        customers = n_customers[dataset]
+        os.makedirs(f'data/instances/capfac/{name}_{customers}c')
+
+        nodes = n_nodes[dataset]
+        os.makedirs(f'data/instances/indset/{name}_{nodes}n')
+
+
+def send_tasks(task_queue: Queue, n_jobs: int, seed: int):
+    """Dispatcher loop: continuously send tasks to the task queue.
+
+    This loop relies on limited queue capacity, as it continuously sends tasks.
+
+    :param task_queue: he task queue to send tasks to.
+    :param n_jobs: The number of jobs to run in parallel.
+    :param seed: A seed value for the random number generator.
     """
 
-    filepaths = []
-    rows = []
+    problems = ['setcov', 'combauc', 'capfac', 'indset']
+    datasets = ['train', 'valid', 'test', 'easy', 'medium', 'hard']
+    n_instances = {'train': 10000, 'valid': 2000, 'test': 2000, 'easy': 20, 'medium': 20, 'hard': 20}
+    rng = np.random.default_rng(seed)
 
-    # Training instances (500x1000).
-    n_instances = 10000
-    n_rows = 500
-    lp_dir = f'data/instances/setcov/train_{n_rows}r'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    rows.extend([n_rows] * n_instances)
+    for problem in problems:
+        for dataset in datasets:
+            for i in range(n_instances[dataset]):
+                task_queue.put(
+                    {'problem': problem, 'dataset': dataset, 'number': i + 1, 'seed': rng.integers(np.iinfo(int).max)})
 
-    # Validation instances (500x1000).
-    n_instances = 2000
-    n_rows = 500
-    lp_dir = f'data/instances/setcov/valid_{n_rows}r'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    rows.extend([n_rows] * n_instances)
+    # Signal to the workers that we are done.
+    for worker in range(n_jobs):
+        task_queue.put({'problem': 'done'})
 
-    # Testing instances (500x1000).
-    n_instances = 2000
-    n_rows = 500
-    lp_dir = f'data/instances/setcov/test_{n_rows}r'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    rows.extend([n_rows] * n_instances)
 
-    # Easy evaluation instances (500x1000).
-    n_instances = 20
-    n_rows = 500
-    lp_dir = f'data/instances/setcov/eval_{n_rows}r'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    rows.extend([n_rows] * n_instances)
+def process_tasks(task_queue: Queue):
+    """Worker loop: fetch an task and generate the corresponding instance.
 
-    # Medium evaluation instances (1000x1000).
-    n_instances = 20
-    n_rows = 1000
-    lp_dir = f'data/instances/setcov/eval_{n_rows}r'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    rows.extend([n_rows] * n_instances)
+    :param task_queue: The task queue from which the worker needs to fetch tasks.
+    """
 
-    # Hard evaluation instances (2000x1000).
-    n_instances = 20
-    n_rows = 2000
-    lp_dir = f'data/instances/setcov/eval_{n_rows}r'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    rows.extend([n_rows] * n_instances)
+    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 2000}
+    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 200, 'hard': 300}
+    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 1500}
+    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 200, 'hard': 400}
+    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 1500}
 
-    # Actually generate the instances.
-    for filepath, n_rows in zip(filepaths, rows):
-        generate_setcov(n_rows, filepath, rng)
+    while True:
+        # Fetch a task.
+        task = task_queue.get()
+
+        if task['problem'] == 'done':
+            # This worker is done.
+            break
+
+        # Process the task.
+        dataset = task['dataset']
+        number = task['number']
+        if dataset == 'easy' or dataset == 'medium' or dataset == 'hard':
+            name = 'eval'
+        else:
+            name = dataset
+
+        rng = np.random.default_rng(task['seed'])
+
+        if task['problem'] == 'setcov':
+            dir = f'data/instances/setcov/{name}_{n_rows[dataset]}r/instance_{number}.lp'
+            generate_setcov(n_rows[dataset], dir, rng)
+        elif task['problem'] == 'combauc':
+            dir = f'data/instances/combauc/{name}_{n_items[dataset]}i_{n_bids[dataset]}b/instance_{number}.lp'
+            generate_combauc(n_items[dataset], n_bids[dataset], dir, rng)
+        elif task['problem'] == 'capfac':
+            dir = f'data/instances/capfac/{name}_{n_customers[dataset]}c/instance_{number}.lp'
+            generate_capfac(n_customers[dataset], dir, rng)
+        elif task['problem'] == 'indset':
+            dir = f'data/instances/indset/{name}_{n_nodes[dataset]}n/instance_{number}.lp'
+            graph = Graph.barabasi_albert(n_nodes[dataset], rng)
+            generate_indset(graph, dir)
 
 
 def generate_setcov(n_rows: int, filepath: str, rng: np.random.Generator, n_cols=1000, density=0.05, max_coef=100):
-    """Generates a set covering problem instance and writes it to a CPLEX LP file.
+    """Generate a set covering problem instance and writes it to a CPLEX LP file.
 
     This method is based on the algorithm described in [1]_, and randomly creates a coefficient matrix with the
     desired density, subject to the requirement that every row has at least two non-zero entries, and each column has
@@ -307,89 +386,10 @@ def generate_setcov(n_rows: int, filepath: str, rng: np.random.Generator, n_cols
         file.write("".join([f" x{j + 1}" for j in range(n_cols)]))
 
 
-def generate_combaucs(rng: np.random.Generator):
-    """Generates combinatorial auction problem instances in accordance with our data generation scheme.
-
-    This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (100x500).
-    Moreover, it generates three set of 100 instances each for evaluation, with dimensions 100x500 (Easy),
-    200x1000 (Medium), and 300x1500 (Hard).
-
-    :param rng: A random number generator.
-    """
-
-    filepaths = []
-    items = []
-    bids = []
-
-    # Training instances (100x500).
-    n_instances = 10000
-    n_items = 100
-    n_bids = 500
-    lp_dir = f'data/instances/combauc/train_{n_items}i_{n_bids}b'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    items.extend([n_items] * n_instances)
-    bids.extend([n_bids] * n_instances)
-
-    # Validation instances (100x500).
-    n_instances = 2000
-    n_items = 100
-    n_bids = 500
-    lp_dir = f'data/instances/combauc/valid_{n_items}i_{n_bids}b'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    items.extend([n_items] * n_instances)
-    bids.extend([n_bids] * n_instances)
-
-    # Test instances (100x500).
-    n_instances = 2000
-    n_items = 100
-    n_bids = 500
-    lp_dir = f'data/instances/combauc/test_{n_items}i_{n_bids}b'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    items.extend([n_items] * n_instances)
-    bids.extend([n_bids] * n_instances)
-
-    # Easy evaluation instances (100x500).
-    n_instances = 20
-    n_items = 100
-    n_bids = 500
-    lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    items.extend([n_items] * n_instances)
-    bids.extend([n_bids] * n_instances)
-
-    # Medium evaluation instances (200x1000).
-    n_instances = 20
-    n_items = 200
-    n_bids = 1000
-    lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    items.extend([n_items] * n_instances)
-    bids.extend([n_bids] * n_instances)
-
-    # Hard evaluation instances (300x1500).
-    n_instances = 20
-    n_items = 300
-    n_bids = 1500
-    lp_dir = f'data/instances/combauc/eval_{n_items}i_{n_bids}b'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    items.extend([n_items] * n_instances)
-    bids.extend([n_bids] * n_instances)
-
-    # Actually generate the instances.
-    for n_items, n_bids, filepath in zip(items, bids, filepaths):
-        generate_combauc(n_items, n_bids, filepath, rng)
-
-
 def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Generator, min_value=1, max_value=100,
                      max_deviation=0.5, add_prob=0.7, max_sub_bids=5, additivity=0.2, budget_factor=1.5,
                      resale_factor=0.5, integers=False):
-    """Generates a combinatorial auction problem instance and writes it to a CPLEX LP file.
+    """Generate a combinatorial auction problem instance and writes it to a CPLEX LP file.
 
     This method iteratively generates bids, based on the algorithm described in Section 4.3 of [1]_. First,
     we generate common resale values for each good from the interval [*min_value*, *max_value*). Then, we generate
@@ -571,74 +571,8 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ge
             file.write(f" x{i + 1}")
 
 
-def generate_capfacs(rng: np.random.Generator):
-    """Generates capacitated facility location problem instances in accordance with our data generation scheme.
-
-    This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (100x100).
-    Moreover, it generates three set of 100 instances each for evaluation, with dimensions 100x100 (Easy),
-    100x200 (Medium), and 100x400 (Hard).
-
-    :param rng: A random number generator.
-    """
-
-    filepaths = []
-    customers = []
-
-    # Training instances (100x100).
-    n_instances = 10000
-    n_customers = 100
-    lp_dir = f'data/instances/capfac/train_{n_customers}c'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    customers.extend([n_customers] * n_instances)
-
-    # Validation instances (100x100).
-    n_instances = 2000
-    n_customers = 100
-    lp_dir = f'data/instances/capfac/valid_{n_customers}c'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    customers.extend([n_customers] * n_instances)
-
-    # Testing instances (100x100).
-    n_instances = 2000
-    n_customers = 100
-    lp_dir = f'data/instances/capfac/test_{n_customers}c'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    customers.extend([n_customers] * n_instances)
-
-    # Easy evaluation instances (100x100).
-    n_instances = 20
-    n_customers = 100
-    lp_dir = f'data/instances/capfac/eval_{n_customers}c'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    customers.extend([n_customers] * n_instances)
-
-    # Medium evaluation instances (100x200).
-    n_instances = 20
-    n_customers = 200
-    lp_dir = f'data/instances/capfac/eval_{n_customers}c'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    customers.extend([n_customers] * n_instances)
-
-    # Hard evaluation instances (100x400).
-    n_instances = 20
-    n_customers = 400
-    lp_dir = f'data/instances/capfac/eval_{n_customers}c'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    customers.extend([n_customers] * n_instances)
-
-    # Actually generate the instances.
-    for n_customers, filepath in zip(customers, filepaths):
-        generate_capfac(n_customers, filepath, rng)
-
-
 def generate_capfac(n_customers: int, filepath: str, rng: np.random.Generator, n_facilities=100, ratio=5):
-    """Generates a capacitated facility location problem instance and writes it to a CPLEX LP file.
+    """Generate a capacitated facility location problem instance and writes it to a CPLEX LP file.
 
     This method randomly generates costs, capacities, demands, based on the algorithm described in [1]_. For this
     purpose, we first randomly place facilities and customers on a 1x1 surface and multiply the Euclidian distance
@@ -716,75 +650,8 @@ def generate_capfac(n_customers: int, filepath: str, rng: np.random.Generator, n
         file.write("".join([f" y_{j + 1}" for j in range(n_facilities)]))
 
 
-def generate_indsets(rng: np.random.Generator):
-    """Generates independent set problem instances in accordance with our data generation scheme.
-
-    This method generates 10000 instances for training, 2000 for validation, and another 2000 for testing (500 nodes).
-    Moreover, it generates three set of 100 instances each for evaluation, with 500 (Easy), 1000 (Medium),
-    and 1500 (Hard) nodes.
-
-    :param rng: A random number generator.
-    """
-
-    filepaths = []
-    nodes = []
-
-    # Training instances (500 nodes).
-    n_instances = 10000
-    n_nodes = 500
-    lp_dir = f'data/instances/indset/train_{n_nodes}n'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    nodes.extend([n_nodes] * n_instances)
-
-    # Validation instances (500 nodes).
-    n_instances = 2000
-    n_nodes = 500
-    lp_dir = f'data/instances/indset/valid_{n_nodes}n'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    nodes.extend([n_nodes] * n_instances)
-
-    # Testing instances (500 nodes).
-    n_instances = 2000
-    n_nodes = 500
-    lp_dir = f'data/instances/indset/test_{n_nodes}n'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    nodes.extend([n_nodes] * n_instances)
-
-    # Easy evaluation instances (500 nodes).
-    n_instances = 20
-    n_nodes = 500
-    lp_dir = f'data/instances/indset/eval_{n_nodes}n'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    nodes.extend([n_nodes] * n_instances)
-
-    # Medium evaluation instances (1000 nodes).
-    n_instances = 20
-    n_nodes = 1000
-    lp_dir = f'data/instances/indset/eval_{n_nodes}n'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    nodes.extend([n_nodes] * n_instances)
-
-    # Hard evaluation instances (1500 nodes).
-    n_instances = 20
-    n_nodes = 1500
-    lp_dir = f'data/instances/indset/eval_{n_nodes}n'
-    os.makedirs(lp_dir)
-    filepaths.extend([os.path.join(lp_dir, f'instance_{i + 1}.lp') for i in range(n_instances)])
-    nodes.extend([n_nodes] * n_instances)
-
-    # Actually generate the instances.
-    for n_nodes, filepath in zip(nodes, filepaths):
-        graph = Graph.barabasi_albert(n_nodes, rng)
-        generate_indset(graph, filepath)
-
-
 def generate_indset(graph: Graph, filepath: str):
-    """Generates a maximum independent set problem instance and writes it to a CPLEX LP file.
+    """Generate a maximum independent set problem instance and writes it to a CPLEX LP file.
 
     This method generates the maximum independent set problem using a previously generated graph, based on the
     algorithm described in [ 1]_. For this purpose, we start by noting that one can only select a single node from
