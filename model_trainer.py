@@ -20,6 +20,7 @@ References
 
 import os
 import pathlib
+from time import perf_counter
 
 import numpy as np
 import tensorflow as tf
@@ -125,6 +126,9 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     # Initialize the model.
     model = GCNN()
 
+    # Start timer.
+    start_time = perf_counter()
+
     # Training loop.
     optimizer = Adam(learning_rate=lambda: lr)  # Dynamic learning rate.
     loss_fn = MeanSquaredError()
@@ -180,6 +184,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     valid_loss, valid_acc = process(model, valid_data, fractions, loss_fn)
     write_log(f"BEST VALID LOSS: {valid_loss:.3e} " + "".join(
         [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
+    write_log(f"Training time: {start_time - perf_counter()} seconds", logfile)
 
 
 def pretrain(model: GCNN, dataloader: tf.data.Dataset):

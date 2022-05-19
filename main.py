@@ -16,10 +16,10 @@ from model_trainer import train_models
 
 def main():
     generate = True
-    collect = True
-    train = True
-    test = True
-    evaluate = True
+    collect = False
+    train = False
+    test = False
+    evaluate = False
     seed = 0
 
     n_jobs = cpu_count() - 6
@@ -28,7 +28,7 @@ def main():
     start_time = time()
 
     if generate:
-        generate_instances(seeds[0])
+        generate_instances(n_jobs, seeds[0])
         print(f"Elapsed time: {str(timedelta(seconds=floor(time() - start_time)))}\n")
 
     if collect:

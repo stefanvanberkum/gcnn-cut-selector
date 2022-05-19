@@ -24,13 +24,13 @@ References
     graph convolutional neural networks. *Neural Information Processing Systems (NeurIPS 2019)*, 15580–15592.
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
-
+import csv
 import glob
 import gzip
-import multiprocessing as mp
 import os
 import pickle
 import shutil
+from multiprocessing import Process, Queue, SimpleQueue
 
 import numpy as np
 from pyscipopt import Model, SCIP_LPSOLSTAT, SCIP_RESULT
@@ -62,7 +62,7 @@ class SamplingAgent(Cutsel):
     :ivar skip_factor: The factor that determines the high-quality threshold relative to the highest-quality cut.
     """
 
-    def __init__(self, episode: int, instance: str, out_queue: mp.SimpleQueue, out_dir: str, seed: int, p_expert=0.05,
+    def __init__(self, episode: int, instance: str, out_queue: SimpleQueue, out_dir: str, seed: int, p_expert=0.01,
                  p_max=0.1, p_max_ub=0.5, skip_factor=0.9):
         self.episode = episode
         self.instance = instance
@@ -79,7 +79,7 @@ class SamplingAgent(Cutsel):
         self.rng = np.random.default_rng(seed)
 
     def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
-        """Samples expert (state, action) pairs based on bound improvement.
+        """Sample expert (state, action) pairs based on bound improvement.
 
         Whenever the expert is not queried, the method falls back to a hybrid cut selection rule.
 
@@ -196,8 +196,11 @@ class SamplingAgent(Cutsel):
 
 
 def collect_data(n_jobs: int, seed: int):
-    """Collects samples for set covering, combinatorial auction, capacitated facility location, and independent set
+    """Collect samples for set covering, combinatorial auction, capacitated facility location, and independent set
     problems in accordance with our sampling scheme.
+
+    The sampling is parallelized over multiple cores. A dispatcher sends tasks to a task queue, which are then
+    processed by the workers.
 
     :param n_jobs: The number of jobs to run in parallel.
     :param seed: A seed value for the random number generator.
@@ -240,7 +243,7 @@ def collect_data(n_jobs: int, seed: int):
 
 def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir: str, n_jobs: int, seed: int,
                     n_train=100000, n_valid=20000, n_test=20000):
-    """Collects samples for a single problem type.
+    """Collect samples for a single problem type.
 
     :param train: A list of filepaths to training instances.
     :param valid: A list of filepaths to validation instances.
@@ -259,18 +262,26 @@ def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir
 
     print("  - Collecting training samples...")
     rng = np.random.default_rng(seeds[0])
-    collect_samples(train, out_dir + '/train', rng, n_train, n_jobs)
+    train_stats = collect_samples(train, n_train, n_jobs, out_dir + '/train', rng)
 
     print("  - Collecting validation samples...")
     rng = np.random.default_rng(seeds[1])
-    collect_samples(valid, out_dir + '/valid', rng, n_valid, n_jobs)
+    valid_stats = collect_samples(valid, n_valid, n_jobs, out_dir + '/valid', rng)
 
     print("  - Collecting testing samples...")
     rng = np.random.default_rng(seeds[2])
-    collect_samples(test, out_dir + '/test', rng, n_test, n_jobs)
+    test_stats = collect_samples(test, n_test, n_jobs, out_dir + '/test', rng)
+
+    fieldnames = ['set', 'n_total', 'n_unique']
+    with open(out_dir + "/stats.csv", 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow({'set': 'train', 'n_total': train_stats[0], 'n_unique': train_stats[1]})
+        writer.writerow({'set': 'valid', 'n_total': valid_stats[0], 'n_unique': valid_stats[1]})
+        writer.writerow({'set': 'test', 'n_total': test_stats[0], 'n_unique': test_stats[1]})
 
 
-def collect_samples(instances: list[str], out_dir: str, rng: np.random.Generator, n_samples: int, n_jobs: int):
+def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: str, rng: np.random.Generator):
     """Runs branch-and-cut episodes on the given set of instances, and collects randomly queried (state,
     action) pairs from an expert decision rule based on bound improvement.
 
@@ -283,29 +294,30 @@ def collect_samples(instances: list[str], out_dir: str, rng: np.random.Generator
 
     :param instances: A list of filepaths to instances to use for sampling.
     :param n_samples: The desired number of samples.
-    :param out_dir: The desired location for saving the collected samples.
     :param n_jobs: The number of jobs to run in parallel.
+    :param out_dir: The desired location for saving the collected samples.
     :param rng: A random number generator.
+    :return: A tuple (n_total, n_unique), representing the total and unique number of instances used for sampling,
+        respectively.
     """
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # Start workers, which process orders from the in queue and send samples to the out queue.
-    task_queue = mp.Queue(maxsize=2 * n_jobs)
-    out_queue = mp.SimpleQueue()
+    # Start workers, which process orders from the task queue and send samples to the out queue.
+    task_queue = Queue(maxsize=2 * n_jobs)
+    out_queue = SimpleQueue()
     workers = []
     for i in range(n_jobs):
-        p = mp.Process(target=generate_samples, args=(task_queue, out_queue), daemon=True)
-        workers.append(p)
-        p.start()
+        worker = Process(target=generate_samples, args=(task_queue, out_queue), daemon=True)
+        workers.append(worker)
+        worker.start()
 
     # Create a temporary directory.
     tmp_dir = f'{out_dir}/tmp'
     os.makedirs(tmp_dir, exist_ok=True)
 
-    # Start dispatcher, which sends tasks to the in queue.
-    dispatcher = mp.Process(target=send_tasks, args=(task_queue, instances, tmp_dir, rng.integers(2 ** 32)),
-                            daemon=True)
+    # Start dispatcher, which sends tasks to the task queue.
+    dispatcher = Process(target=send_tasks, args=(task_queue, instances, tmp_dir, rng.integers(2 ** 32)), daemon=True)
     dispatcher.start()
 
     # Record and write finished samples received in the out queue.
@@ -313,6 +325,8 @@ def collect_samples(instances: list[str], out_dir: str, rng: np.random.Generator
     current_episode = 0
     i = 0
     in_buffer = 0
+    n_instances = 0
+    unique = set()
     progress = 1
     while i < n_samples:
         sample = out_queue.get()
@@ -335,6 +349,8 @@ def collect_samples(instances: list[str], out_dir: str, rng: np.random.Generator
                     # Received signal that the optimization for this episode finished, so move on to next episode.
                     del buffer[current_episode]
                     current_episode += 1
+                    n_instances += 1
+                    unique.add(sample['instance'])
                 else:
                     # Write sample.
                     os.rename(sample['filename'], f'{out_dir}/sample_{i + 1}.pkl')
@@ -361,6 +377,8 @@ def collect_samples(instances: list[str], out_dir: str, rng: np.random.Generator
     # Remove temporary directory.
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    return n_instances, len(unique)
+
 
 def send_tasks(task_queue, instances, out_dir, seed):
     """Dispatcher loop: continuously send tasks to the task queue.
@@ -385,7 +403,7 @@ def send_tasks(task_queue, instances, out_dir, seed):
 
 
 def generate_samples(task_queue, out_queue):
-    """Worker loop: fetch an instance, run an episode, and send samples to the out queue.
+    """Worker loop: fetch a task, run an episode, and send samples to the out queue.
 
     :param task_queue: The task queue from which the worker needs to fetch tasks.
     :param out_queue: The out queue to which the worker should send finished samples and 'done' orders.
@@ -412,4 +430,4 @@ def generate_samples(task_queue, out_queue):
         model.freeProb()
 
         # Signal that the episode has finished.
-        out_queue.put({'type': 'done', 'episode': episode})
+        out_queue.put({'type': 'done', 'episode': episode, 'instance': instance})

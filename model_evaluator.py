@@ -23,7 +23,7 @@ References
 
 import csv
 import os
-import time
+from time import perf_counter, process_time
 
 import numpy as np
 import pyscipopt as scip
@@ -258,15 +258,15 @@ def evaluate_problem(problem: str, seeds: np.array):
                                             'selects cuts based on estimated bound improvement', 5000000)
 
                     # Start timers.
-                    wall_time = time.perf_counter()
-                    process_time = time.process_time()
+                    wall_time = perf_counter()
+                    proc_time = process_time()
 
                     # Optimize the problem.
                     model.optimize()
 
                     # Record times.
-                    wall_time = time.perf_counter() - wall_time
-                    process_time = time.process_time() - process_time
+                    wall_time = perf_counter() - wall_time
+                    proc_time = process_time() - proc_time
 
                     # Record SCIP statistics.
                     solve_time = model.getSolvingTime()
@@ -279,6 +279,6 @@ def evaluate_problem(problem: str, seeds: np.array):
                     writer.writerow(
                         {'selector': selector, 'difficulty': instance['difficulty'], 'instance': instance['instance'],
                          'seed': seed, 'n_nodes': n_nodes, 'n_lps': n_lps, 'solve_time': solve_time, 'gap': gap,
-                         'status': status, 'wall_time': wall_time, 'process_time': process_time})
+                         'status': status, 'wall_time': wall_time, 'process_time': proc_time})
                     csvfile.flush()
                     model.freeProb()
