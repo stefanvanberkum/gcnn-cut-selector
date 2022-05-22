@@ -11,7 +11,7 @@ Graph convolutional neural network (GCNN) for cutting plane selection.
 
 ## Usage
 
-The experiments have to be run sequentially, but they can either be run from an editor (one long run) or run via the
+The experiments can either be run from an editor (one long run) or run via the
 command line (many short runs). If you run on a single machine, running from the editor is the most straightforward. The
 command line is especially useful if you would like to run multiple jobs concurrently. Both the editor and command line
 make use of
