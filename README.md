@@ -11,7 +11,7 @@ Graph convolutional neural network (GCNN) for cutting plane selection.
 
 ## Usage
 
-The experiments can either be run from an editor (one long run) or run via the
+The experiments can either be run from an editor (one long run) or via the
 command line (many short runs). If you run on a single machine, running from the editor is the most straightforward. The
 command line is especially useful if you would like to run multiple jobs concurrently. Both the editor and command line
 make use of
@@ -32,7 +32,7 @@ The following commands can be used to run all the experiments.
 python instance_generator.py
 ```
 
-Optional argument:
+Optional arguments:
 
 - --n_jobs: The number of jobs to run in parallel (default: all cores).
 - --seed: The seed value used for the program.
@@ -51,7 +51,7 @@ do
 done
 ```
 
-Optional arguments:
+Optional argument:
 
 - --n_jobs: The number of jobs to run in parallel (default: all cores).
 
@@ -62,7 +62,7 @@ The following loop runs all training sequentially, but it can be split up into p
 ```
 for problem in setcov combauc capfac indset
 do
-  for iteration in {1...5}
+  for iteration in {1..5}
   do
     python model_trainer.py $problem $iteration
   done
@@ -76,7 +76,7 @@ The following loop runs all testing sequentially, but it can be split up into pa
 ```
 for problem in setcov combauc capfac indset
 do
-  for iteration in {1...5}
+  for iteration in {1..5}
   do
     python model_tester.py $problem $iteration
   done
@@ -89,7 +89,7 @@ done
 python model_evaluator.py
 ```
 
-Optional arguments:
+Optional argument:
 
 - --n_jobs: The number of jobs to run in parallel (default: all cores).
 
