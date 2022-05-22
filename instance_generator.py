@@ -24,11 +24,14 @@ References
 """
 
 import os
+from argparse import ArgumentParser
 from itertools import combinations
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, cpu_count
 
 import numpy as np
 import scipy.sparse
+
+from utils import generate_seeds, load_seeds
 
 
 class Graph:
@@ -155,7 +158,7 @@ class Graph:
         return Graph(n_nodes, edges, degrees, neighbors)
 
 
-def generate_instances(n_jobs: int, seed: int):
+def generate_instances(n_jobs: int):
     """Generate set covering, combinatorial auction, capacitated facility location, and independent set problem
     instances in accordance with our data generation scheme.
 
@@ -190,7 +193,6 @@ def generate_instances(n_jobs: int, seed: int):
     by the workers.
 
     :param n_jobs: The number of jobs to run in parallel.
-    :param seed: A seed value for the random number generator.
     """
 
     print("Generating instances...")
@@ -199,6 +201,7 @@ def generate_instances(n_jobs: int, seed: int):
     problems = ['setcov', 'combauc', 'capfac', 'indset']
     datasets = ['train', 'valid', 'test', 'easy', 'medium', 'hard']
     n_instances = {'train': 10000, 'valid': 2000, 'test': 2000, 'easy': 20, 'medium': 20, 'hard': 20}
+    seed = load_seeds(name='program_seeds')[0]
     rng = np.random.default_rng(seed)
 
     # Schedule jobs.
@@ -286,18 +289,18 @@ def process_tasks(task_queue: Queue):
         rng = np.random.default_rng(task['seed'])
 
         if task['problem'] == 'setcov':
-            dir = f'data/instances/setcov/{name}_{n_rows[dataset]}r/instance_{number}.lp'
-            generate_setcov(n_rows[dataset], dir, rng)
+            filepath = f'data/instances/setcov/{name}_{n_rows[dataset]}r/instance_{number}.lp'
+            generate_setcov(n_rows[dataset], filepath, rng)
         elif task['problem'] == 'combauc':
-            dir = f'data/instances/combauc/{name}_{n_items[dataset]}i_{n_bids[dataset]}b/instance_{number}.lp'
-            generate_combauc(n_items[dataset], n_bids[dataset], dir, rng)
+            filepath = f'data/instances/combauc/{name}_{n_items[dataset]}i_{n_bids[dataset]}b/instance_{number}.lp'
+            generate_combauc(n_items[dataset], n_bids[dataset], filepath, rng)
         elif task['problem'] == 'capfac':
-            dir = f'data/instances/capfac/{name}_{n_customers[dataset]}c/instance_{number}.lp'
-            generate_capfac(n_customers[dataset], dir, rng)
+            filepath = f'data/instances/capfac/{name}_{n_customers[dataset]}c/instance_{number}.lp'
+            generate_capfac(n_customers[dataset], filepath, rng)
         elif task['problem'] == 'indset':
-            dir = f'data/instances/indset/{name}_{n_nodes[dataset]}n/instance_{number}.lp'
+            filepath = f'data/instances/indset/{name}_{n_nodes[dataset]}n/instance_{number}.lp'
             graph = Graph.barabasi_albert(n_nodes[dataset], rng)
-            generate_indset(graph, dir)
+            generate_indset(graph, filepath)
 
 
 def generate_setcov(n_rows: int, filepath: str, rng: np.random.Generator, n_cols=1000, density=0.05, max_coef=100):
@@ -683,3 +686,17 @@ def generate_indset(graph: Graph, filepath: str):
         for count, group in enumerate(inequalities):
             lp_file.write(f" c{count + 1}:" + "".join([f" + x{node + 1}" for node in sorted(group)]) + " <= 1\n")
         lp_file.write("\nBINARY\n" + "".join([f" x{node + 1}" for node in range(len(graph))]) + "\n")
+
+
+if __name__ == '__main__':
+    # For command line use.
+    parser = ArgumentParser()
+    parser.add_argument('-j', '--n_jobs', help='The number of jobs to run in parallel (default: all cores).',
+                        default=cpu_count())
+    parser.add_argument('-s', '--seed', help='The seed value used for the program.', default=0)
+    args = parser.parse_args()
+
+    generate_seeds(n_seeds=3, name='program_seeds', seed=args.seed)
+
+    print(f"Running {args.n_jobs} jobs in parallel.")
+    generate_instances(args.n_jobs)

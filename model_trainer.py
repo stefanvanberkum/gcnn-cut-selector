@@ -17,23 +17,27 @@ References
     graph convolutional neural networks. *Neural Information Processing Systems (NeurIPS 2019)*, 15580–15592.
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
+
 import os
 import pathlib
+from argparse import ArgumentParser
 from time import perf_counter
 
 import numpy as np
 import tensorflow as tf
+from numpy.random import default_rng
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.optimizers import Adam
 
 from model import GCNN
-from utils import load_batch_tf, load_seeds, write_log
+from utils import generate_seeds, load_batch_tf, load_seeds, write_log
 
 
 def train_models():
     """Trains the models in accordance with our training scheme."""
 
-    seeds = load_seeds()
+    seed = load_seeds(name='program_seeds')[2]
+    seeds = generate_seeds(n_seeds=5, name='train_seeds', seed=seed)
 
     print("Training models...")
     for i in range(5):
@@ -178,7 +182,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     valid_loss, valid_acc = process(model, valid_data, fractions, loss_fn)
     write_log(f"BEST VALID LOSS: {valid_loss:.3e} " + "".join(
         [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
-    write_log(f"Training time: {start_time - perf_counter()} seconds", logfile)
+    write_log(f"Training time: {perf_counter() - start_time} seconds", logfile)
 
 
 def pretrain(model: GCNN, dataloader: tf.data.Dataset):
@@ -293,3 +297,22 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, loss_
     mean_acc /= n_samples
 
     return mean_loss, mean_acc
+
+
+if __name__ == '__main__':
+    # For command line use.
+    parser = ArgumentParser()
+    parser.add_argument('problem', help='The problem type, one of {setcov, combauc, capfac, indset}.')
+    parser.add_argument('iteration', help='The iteration to train (seed index), one of {1, ..., 5}.', type=int)
+    args = parser.parse_args()
+
+    # Generate training seeds and get the one that corresponds to the specified problem.
+    program_seed = load_seeds(name='program_seeds')[2]
+    generator = np.random.default_rng(program_seed)
+    train_seeds = generate_seeds(n_seeds=5, name='train_seeds', seed=program_seed)
+    train_seed = train_seeds[args.iteration - 1]
+
+    # Train the model.
+    print(f"Training a model for {args.problem} problems, iteration {args.iteration}...")
+    train_model(args.problem, train_seed)
+    print("Done!")

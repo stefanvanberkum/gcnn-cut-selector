@@ -30,13 +30,14 @@ import gzip
 import os
 import pickle
 import shutil
-from multiprocessing import Process, Queue, SimpleQueue
+from argparse import ArgumentParser
+from multiprocessing import Process, Queue, SimpleQueue, cpu_count
 
 import numpy as np
 from pyscipopt import Model, SCIP_LPSOLSTAT, SCIP_RESULT
 from pyscipopt.scip import Cutsel
 
-from utils import get_state, init_scip
+from utils import get_state, init_scip, load_seeds
 
 
 class SamplingAgent(Cutsel):
@@ -79,7 +80,7 @@ class SamplingAgent(Cutsel):
         self.rng = np.random.default_rng(seed)
 
     def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
-        """Sample expert (state, action) pairs based on bound improvement.
+        """Samples expert (state, action) pairs based on bound improvement.
 
         Whenever the expert is not queried, the method falls back to a hybrid cut selection rule.
 
@@ -195,7 +196,7 @@ class SamplingAgent(Cutsel):
         return {'cuts': sorted_cuts, 'nselectedcuts': min(n_selected, maxnselectedcuts), 'result': SCIP_RESULT.SUCCESS}
 
 
-def collect_data(n_jobs: int, seed: int):
+def collect_data(n_jobs: int):
     """Collect samples for set covering, combinatorial auction, capacitated facility location, and independent set
     problems in accordance with our sampling scheme.
 
@@ -203,9 +204,9 @@ def collect_data(n_jobs: int, seed: int):
     processed by the workers.
 
     :param n_jobs: The number of jobs to run in parallel.
-    :param seed: A seed value for the random number generator.
     """
 
+    seed = load_seeds(name='program_seeds')[1]
     seed_generator = np.random.default_rng(seed)
     seeds = seed_generator.integers(2 ** 32, size=4)
 
@@ -272,13 +273,14 @@ def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir
     rng = np.random.default_rng(seeds[2])
     test_stats = collect_samples(test, n_test, n_jobs, out_dir + '/test', rng)
 
-    fieldnames = ['set', 'n_total', 'n_unique']
-    with open(out_dir + "/stats.csv", 'w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerow({'set': 'train', 'n_total': train_stats[0], 'n_unique': train_stats[1]})
-        writer.writerow({'set': 'valid', 'n_total': valid_stats[0], 'n_unique': valid_stats[1]})
-        writer.writerow({'set': 'test', 'n_total': test_stats[0], 'n_unique': test_stats[1]})
+    stats = {'train': train_stats, 'valid': valid_stats, 'test': test_stats}
+    for set_type in stats.keys():
+        set_stats = stats[set_type]
+        fields = ['set', 'n_total', 'n_unique']
+        with open(out_dir + f"/{set_type}_stats.csv", 'w', newline='') as f:
+            dict_writer = csv.DictWriter(f, fieldnames=fields)
+            dict_writer.writeheader()
+            dict_writer.writerow({'set': 'train', 'n_total': set_stats[0], 'n_unique': set_stats[1]})
 
 
 def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: str, rng: np.random.Generator):
@@ -308,9 +310,9 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
     out_queue = SimpleQueue()
     workers = []
     for i in range(n_jobs):
-        worker = Process(target=generate_samples, args=(task_queue, out_queue), daemon=True)
-        workers.append(worker)
-        worker.start()
+        p = Process(target=generate_samples, args=(task_queue, out_queue), daemon=True)
+        workers.append(p)
+        p.start()
 
     # Create a temporary directory.
     tmp_dir = f'{out_dir}/tmp'
@@ -431,3 +433,45 @@ def generate_samples(task_queue, out_queue):
 
         # Signal that the episode has finished.
         out_queue.put({'type': 'done', 'episode': episode, 'instance': instance})
+
+
+if __name__ == '__main__':
+    # For command line use.
+    parser = ArgumentParser()
+    parser.add_argument('problem', help='The problem type, one of {setcov, combauc, capfac, indset}.')
+    parser.add_argument('set', help='The set to sample, one of {train, valid, test}.')
+    parser.add_argument('-j', '--n_jobs', help='The number of jobs to run in parallel (default: all cores).',
+                        default=cpu_count())
+    args = parser.parse_args()
+
+    n_samples = {'train': 1000, 'valid': 200, 'test': 200}
+    problem_indices = {'setcov': 0, 'combauc': 1, 'capfac': 2, 'indset': 3}
+    set_indices = {'train': 0, 'valid': 1, 'test': 2}
+    dims = {'setcov': '50r', 'combauc': '10i_50b', 'capfac': '10c', 'indset': '50n'}
+
+    # Generate all seeds for this module and get the one that corresponds to the specified problem.
+    program_seed = load_seeds(name='program_seeds')[1]
+    generator = np.random.default_rng(program_seed)
+    module_seeds = generator.integers(2 ** 32, size=4)
+    module_seed = module_seeds[problem_indices[args.problem]]
+
+    dimension = dims[args.problem]
+    filepaths = glob.glob(f"data/instances/{args.problem}/{args.set}_{dimension}/*.lp")
+    output_dir = f"data/samples/{args.problem}/{dimension}/{args.set}"
+
+    os.makedirs(output_dir, exist_ok=True)
+    generator = np.random.default_rng(module_seed)
+    sampling_seeds = generator.integers(2 ** 32, size=3)
+    sampling_seed = sampling_seeds[set_indices[args.set]]
+    sampling_rng = np.random.default_rng(sampling_seed)
+
+    print(f"Running {args.n_jobs} jobs in parallel.")
+    print(f"Collecting {args.problem} {args.set} set samples...")
+    n_total, n_unique = collect_samples(filepaths, n_samples[args.set], args.n_jobs, output_dir, sampling_rng)
+
+    fieldnames = ['set', 'n_total', 'n_unique']
+    with open(f"data/samples/{args.problem}/{dimension}/{args.set}_stats.csv", 'w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow({'set': args.set, 'n_total': n_total, 'n_unique': n_unique})
+    print("Done!")

@@ -23,12 +23,14 @@ References
 
 import csv
 import os
-from multiprocessing import Process, Queue
+from argparse import ArgumentParser
+from multiprocessing import Manager, Process, Queue, cpu_count
 from time import perf_counter, process_time
 
 import numpy as np
 import pyscipopt as scip
 import tensorflow as tf
+from numpy.random import default_rng
 from pyscipopt import SCIP_RESULT
 from pyscipopt.scip import Cutsel
 
@@ -50,20 +52,17 @@ class CustomCutsel(Cutsel):
 
     :ivar gcnn: An optional trained GCNN model, if provided, this will be used to rank the cut candidates. Otherwise,
         the hybrid approach will be used.
-    :ivar p_expert: The probability of querying the expert on each cut selection round.
     :ivar p_max: The maximum parallelism for low-quality cuts.
     :ivar p_max_ub: The maximum parallelism for high-quality cuts.
     :ivar skip_factor: The factor that determines the high-quality threshold relative to the highest-quality cut.
     """
 
-    def __init__(self, gcnn=None, p_expert=0.05, p_max=0.1, p_max_ub=0.5, skip_factor=0.9):
+    def __init__(self, function=None, p_max=0.1, p_max_ub=0.5, skip_factor=0.9):
         self.use_gcnn = False
-        if isinstance(gcnn, GCNN):
-            # Compile the GCNN model call as TensorFlow function for performance.
-            self.get_improvements = tf.function(gcnn.call, input_signature=gcnn.input_signature)
+        if function is not None:
+            self.get_improvements = function
             self.use_gcnn = True
 
-        self.p_expert = p_expert
         self.p_max = p_max
         self.p_max_ub = p_max_ub
         self.skip_factor = skip_factor
@@ -102,7 +101,7 @@ class CustomCutsel(Cutsel):
                     n_cons, n_vars, n_cuts
 
             # Get the predicted bound improvements.
-            quality = self.get_improvements(state, tf.convert_to_tensor(False)).numpy()
+            quality = self.get_improvements(state, tf.convert_to_tensor(False, dtype=tf.bool)).numpy()
         else:
             # Use a hybrid cut selection rule.
             if self.model.getBestSol() is not None:
@@ -202,10 +201,15 @@ def evaluate_models(n_jobs: int):
     difficulties = ['hard', 'medium', 'easy']
     problems = ['setcov', 'combauc', 'capfac', 'indset']
     cut_selectors = ['hybrid', 'gcnn']
-    seeds = load_seeds()
+    seeds = load_seeds(name='train_seeds')[:2]
+
+    # Disable GPU for fair measurement.
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+    tf.config.set_visible_devices([], 'GPU')
 
     # Schedule jobs (hard to easy in order to minimize the number of idle CPU cores).
-    task_queue = Queue()
+    manager = Manager()
+    task_queue = manager.Queue()
     for difficulty in difficulties:
         for problem in problems:
             problem_folders = folders[problem]
@@ -218,10 +222,10 @@ def evaluate_models(n_jobs: int):
 
     # Append worker termination signals to the queue.
     for i in range(n_jobs):
-        task_queue.put({'problem': 'done'})
+        task_queue.put('done')
 
     # Start workers and tell them to process orders from the task queue.
-    out_queue = Queue()
+    out_queue = manager.Queue()
     workers = []
     for i in range(n_jobs):
         worker = Process(target=process_tasks, args=(task_queue, out_queue), daemon=True)
@@ -233,19 +237,19 @@ def evaluate_models(n_jobs: int):
         worker.join()
 
     # Append an end message to the queue.
-    out_queue.put({'problem': 'end'})
+    out_queue.put('end')
 
     # Write the results to a CSV file.
-    fieldnames = ['selector', 'difficulty', 'instance', 'seed', 'n_nodes', 'n_lps', 'solve_time', 'gap', 'status',
-                  'wall_time', 'process_time']
-    with open('/results/eval.csv', 'w', newline='') as file:
+    fieldnames = ['problem', 'difficulty', 'instance', 'selector', 'seed', 'n_nodes', 'n_lps', 'solve_time', 'gap',
+                  'status', 'wall_time', 'process_time']
+    with open('results/eval.csv', 'w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
 
         while True:
             # Fetch a result from the queue.
             result = out_queue.get()
-            if result['problem'] == 'end':
+            if result == 'end':
                 # We have reached the end of the queue.
                 break
 
@@ -269,7 +273,7 @@ def process_tasks(task_queue: Queue, out_queue: Queue):
         # Fetch a task.
         task = task_queue.get()
 
-        if task['problem'] == 'done':
+        if task == 'done':
             # This worker is done.
             break
 
@@ -291,8 +295,16 @@ def process_tasks(task_queue: Queue, out_queue: Queue):
                                 'selects cuts based on weighted average of quality metrics', 5000000)
         else:
             # Solve using our GCNN cut selector.
-            gcnn = GCNN().restore_state(f'trained_models/{problem}/{seed}/best_params.pkl')
-            cut_selector = CustomCutsel(gcnn=gcnn)
+            gcnn = GCNN()
+
+            # Load the trained model.
+            gcnn.restore_state(f'trained_models/{problem}/{seed}/best_params.pkl')
+
+            # Precompile the forward pass (call) for performance.
+            gcnn.call = tf.function(gcnn.call, input_signature=gcnn.input_signature)
+            get_improvements = gcnn.call.get_concrete_function()
+
+            cut_selector = CustomCutsel(function=get_improvements)
             model.includeCutsel(cut_selector, 'GCNN cut selector', 'selects cuts based on estimated bound improvement',
                                 5000000)
 
@@ -319,3 +331,14 @@ def process_tasks(task_queue: Queue, out_queue: Queue):
             problem, difficulty, instance, selector, seed, n_nodes, n_lps, solve_time, gap, status, wall_time,
             proc_time))
         model.freeProb()
+
+
+if __name__ == '__main__':
+    # For command line use.
+    parser = ArgumentParser()
+    parser.add_argument('-j', '--n_jobs', help='The number of jobs to run in parallel (default: all cores).',
+                        default=cpu_count())
+    args = parser.parse_args()
+
+    print(f"Running {args.n_jobs} jobs in parallel.")
+    evaluate_models(args.n_jobs)

@@ -20,9 +20,11 @@ References
 import csv
 import os
 import pathlib
+from argparse import ArgumentParser
 
 import numpy as np
 import tensorflow as tf
+from numpy.random import default_rng
 
 from model import GCNN
 from utils import load_batch_tf, load_seeds
@@ -31,24 +33,26 @@ from utils import load_batch_tf, load_seeds
 def test_models():
     """Tests the models in accordance with our testing scheme."""
 
-    seeds = load_seeds()
+    seeds = load_seeds(name='train_seeds')[:2]
 
     print("Testing models...")
-    test_model('setcov', seeds)
-    test_model('combauc', seeds)
-    test_model('capfac', seeds)
-    test_model('indset', seeds)
+    for i in range(5):
+        print(f"Iteration: {i}")
+        test_model('setcov', seeds[i])
+        test_model('combauc', seeds[i])
+        test_model('capfac', seeds[i])
+        test_model('indset', seeds[i])
     print("Done!")
 
 
-def test_model(problem: str, seeds: np.array, test_batch_size=128):
+def test_model(problem: str, seed: np.array, test_batch_size=128):
     """Tests a trained model on testing data and writes the results to a CSV file.
 
     The accuracy on given fractions of the cut candidate ranking is written to a CSV file. That is, how often the
     model ranked the top x% of cut candidates correctly.
 
     :param problem: The problem type to be considered, one of: {'setcov', 'combauc', 'capfac', or 'indset'}.
-    :param seeds: A list of seeds that were used for training the models.
+    :param seed: A seed that was used for training a models.
     :param test_batch_size: The number of samples in each testing batch.
     """
 
@@ -58,38 +62,36 @@ def test_model(problem: str, seeds: np.array, test_batch_size=128):
                        'indset': 'indset/500n'}
     problem_folder = problem_folders[problem]
 
-    os.makedirs('results', exist_ok=True)
-    result_file = f"results/{problem}_test.csv"
+    os.makedirs(f"results/test/{problem}", exist_ok=True)
+    result_file = f"results/test/{problem}/{seed}.csv"
 
     # Retrieve testing samples.
     test_files = list(pathlib.Path(f"data/samples/{problem_folder}/test").glob('sample_*.pkl'))
     test_files = [str(x) for x in test_files]
 
+    # Compile the model call as TensorFlow function for performance.
+    model = GCNN()
+    model.call = tf.function(model.call, input_signature=model.input_signature)
+
+    rng = np.random.default_rng(seed)
+    tf.random.set_seed(rng.integers(np.iinfo(int).max))
+
+    # Load the trained model.
+    model.restore_state(f"trained_models/{problem}/{seed}/best_params.pkl")
+
+    # Prepare testing dataset.
+    test_data = tf.data.Dataset.from_tensor_slices(test_files)
+    test_data = test_data.batch(test_batch_size)
+    test_data = test_data.map(load_batch_tf)
+    test_data = test_data.prefetch(2)
+
+    test_acc = process(model, test_data, fractions)
+
     fieldnames = ['seed', ] + [f'{100 * frac:.0f}%' for frac in fractions]
-    with open(result_file, 'w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
+    with open(result_file, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-
-        for seed in seeds:
-            rng = np.random.default_rng(seed)
-            tf.random.set_seed(rng.integers(np.iinfo(int).max))
-
-            # Load the trained model.
-            model = GCNN()
-            model.restore_state(f"trained_models/{problem}/{seed}/best_params.pkl")
-
-            # Compile the model call as TensorFlow function for performance.
-            model.call = tf.function(model.call, input_signature=model.input_signature)
-
-            # Prepare testing dataset.
-            test_data = tf.data.Dataset.from_tensor_slices(test_files)
-            test_data = test_data.batch(test_batch_size)
-            test_data = test_data.map(load_batch_tf)
-            test_data = test_data.prefetch(2)
-
-            test_acc = process(model, test_data, fractions)
-            writer.writerow({'seed': seed, **{f'{100 * k:.0f}%': test_acc[i] for i, k in enumerate(fractions)}})
-            file.flush()
+        writer.writerow({'seed': seed, **{f'{100 * k:.0f}%': test_acc[i] for i, k in enumerate(fractions)}})
 
 
 def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
@@ -148,3 +150,20 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
     mean_acc /= n_samples
 
     return mean_acc
+
+
+if __name__ == '__main__':
+    # For command line use.
+    parser = ArgumentParser()
+    parser.add_argument('problem', help='The problem type, one of {setcov, combauc, capfac, indset}.')
+    parser.add_argument('iteration', help='The iteration to train (seed index), one of {1, ..., 5}.', type=int)
+    args = parser.parse_args()
+
+    # Retrieve training seeds and get the one that corresponds to the specified problem.
+    test_seeds = load_seeds(name='train_seeds')
+    test_seed = test_seeds[args.iteration - 1]
+
+    # Train the model.
+    print(f"Testing a model for {args.problem} problems, iteration {args.iteration}...")
+    test_model(args.problem, test_seed)
+    print("Done!")

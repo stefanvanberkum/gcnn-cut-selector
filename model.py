@@ -255,7 +255,7 @@ class GCNN(BaseModel):
             self.output_module.build(emb_shape)
             self.built = True
 
-    def call(self, inputs, training: bool):
+    def call(self, inputs, training):
         """Calls the model using the specified input.
 
         Accepts stacked mini-batches, in which case the number of candidate cuts per sample has to be provided,
@@ -298,7 +298,7 @@ class GCNN(BaseModel):
 
         # Output.
         output = self.output_module(cut_feats)
-        return output
+        return tf.reshape(output, shape=[-1])
 
 
 class PreNormLayer(Layer):
@@ -376,10 +376,10 @@ class PreNormLayer(Layer):
             raise PreNormException
 
         if self.shift is not None:
-            inputs += self.shift
+            inputs = tf.add(inputs, self.shift)
 
         if self.scale is not None:
-            inputs *= self.scale
+            inputs = tf.multiply(inputs, self.scale)
         return inputs
 
     def start_updates(self):
@@ -406,9 +406,6 @@ class PreNormLayer(Layer):
 
         :param inputs: An input tensor.
         """
-
-        assert self.n_units == 1 or inputs.shape[
-            -1] == self.n_units, f"Expected input dimension of size {self.n_units}, got {inputs.shape[-1]}."
 
         # Compute sample mean and variance.
         inputs = tf.reshape(inputs, [-1, self.n_units])
@@ -534,7 +531,7 @@ class PartialGraphConvolution(Model):
         self.output_module.build([None, self.emb_size + (l_shape[1] if self.from_v else v_shape[1])])
         self.built = True
 
-    def call(self, inputs, training: bool):
+    def call(self, inputs, training):
         """Calls the model using the specified input, and performs a partial graph convolution.
 
         Input is of the form [*left_features*, *edge_indices*, *edge_features*, *variable_features*, *out_size*],

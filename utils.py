@@ -19,8 +19,10 @@ References
     graph convolutional neural networks. *Neural Information Processing Systems (NeurIPS 2019)*, 15580–15592.
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
+
 import datetime
 import gzip
+import os
 import pickle
 from math import floor
 
@@ -278,32 +280,36 @@ def init_scip(model: pyscipopt.scip.Model, seed: int, cpu_time=False):
         model.setIntParam('timing/clocktype', 1)
 
 
-def generate_seeds(seed: int):
-    """Generates five seeds for model training, testing, and evaluation.
+def generate_seeds(n_seeds: int, name: str, seed: int):
+    """Generates seeds and saves them for later use.
 
-    The seeds are stored to both a pickle and CSV file.
+    The seeds are stored to both a NumPy and CSV file.
 
+    :param n_seeds: The desired number of seeds to be generated.
+    :param name: The desired name for the seeds.
     :param seed: The seed value used to generate random seeds.
+    :return: The generated numpy array containing the seeds.
     """
+
+    os.makedirs('seeds', exist_ok=True)
 
     seed_generator = np.random.default_rng(seed)
-    seeds = seed_generator.integers(2 ** 32, size=5)
+    seeds = seed_generator.integers(2 ** 32, size=n_seeds)
 
-    with open('/seeds/seeds.pkl', 'wb') as file:
-        pickle.dump(seeds, file)
-    with open('/seeds/seeds.csv', 'w') as file:
+    np.save(f"seeds/{name}.npy", seeds)
+    with open(f"seeds/{name}.csv", 'w') as file:
         print(*seeds, sep=',', file=file)
+    return seeds
 
 
-def load_seeds():
+def load_seeds(name: str):
     """Loads the previously generated seeds.
 
-    :return: A numpy array of five seeds.
+    :param name: The name of the seeds to be loaded.
+    :return: A numpy array containing the seeds.
     """
 
-    with gzip.open('/seeds/seeds.pkl', 'rb') as file:
-        seeds = pickle.load(file)
-    return seeds
+    return np.load(f"seeds/{name}.npy")
 
 
 def load_batch_tf(x):
