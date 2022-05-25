@@ -1,5 +1,7 @@
 Graph convolutional neural network (GCNN) for cutting plane selection.
 
+## About
+
 ## Installation
 
 - If you do not have Conda, you can download Anaconda or Miniconda following the instructions listed
@@ -114,3 +116,5 @@ Optional argument:
     - Module used for training models.
 - ```utils.py```
     - Module that provides some general utility methods.
+
+## Time

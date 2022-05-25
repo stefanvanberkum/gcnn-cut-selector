@@ -25,8 +25,11 @@ References
 
 import os
 from argparse import ArgumentParser
+from datetime import timedelta
 from itertools import combinations
+from math import ceil
 from multiprocessing import Process, Queue, cpu_count
+from time import perf_counter, process_time
 
 import numpy as np
 import scipy.sparse
@@ -195,6 +198,10 @@ def generate_instances(n_jobs: int):
     :param n_jobs: The number of jobs to run in parallel.
     """
 
+    # Start timers.
+    wall_start = perf_counter()
+    proc_start = process_time()
+
     print("Generating instances...")
     make_dirs()
 
@@ -227,6 +234,8 @@ def generate_instances(n_jobs: int):
     for worker in workers:
         worker.join()
     print("Done!")
+    print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
+    print(f"CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
 
 
 def make_dirs():

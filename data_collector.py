@@ -31,7 +31,10 @@ import os
 import pickle
 import shutil
 from argparse import ArgumentParser
+from datetime import timedelta
+from math import ceil
 from multiprocessing import Process, Queue, SimpleQueue, cpu_count
+from time import perf_counter, process_time
 
 import numpy as np
 from pyscipopt import Model, SCIP_LPSOLSTAT, SCIP_RESULT
@@ -303,6 +306,10 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
         respectively.
     """
 
+    # Start timers.
+    wall_start = perf_counter()
+    proc_start = process_time()
+
     os.makedirs(out_dir, exist_ok=True)
 
     # Start workers, and tell them to process orders from the task queue and send samples to the out queue.
@@ -379,6 +386,9 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
     # Remove temporary directory.
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    print(f"    - Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
+    print(f"    - CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
+
     return n_instances, len(unique)
 
 
@@ -444,7 +454,7 @@ if __name__ == '__main__':
                         default=cpu_count())
     args = parser.parse_args()
 
-    n_samples = {'train': 1000, 'valid': 200, 'test': 200}
+    sample_count = {'train': 1000, 'valid': 200, 'test': 200}
     problem_indices = {'setcov': 0, 'combauc': 1, 'capfac': 2, 'indset': 3}
     set_indices = {'train': 0, 'valid': 1, 'test': 2}
     dims = {'setcov': '50r', 'combauc': '10i_50b', 'capfac': '10c', 'indset': '50n'}
@@ -467,7 +477,7 @@ if __name__ == '__main__':
 
     print(f"Running {args.n_jobs} jobs in parallel.")
     print(f"Collecting {args.problem} {args.set} set samples...")
-    n_total, n_unique = collect_samples(filepaths, n_samples[args.set], args.n_jobs, output_dir, sampling_rng)
+    n_total, n_unique = collect_samples(filepaths, sample_count[args.set], args.n_jobs, output_dir, sampling_rng)
 
     fieldnames = ['set', 'n_total', 'n_unique']
     with open(f"data/samples/{args.problem}/{dimension}/{args.set}_stats.csv", 'w', newline='') as file:

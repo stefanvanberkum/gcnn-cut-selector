@@ -21,6 +21,8 @@ References
 import os
 import pathlib
 from argparse import ArgumentParser
+from datetime import timedelta
+from math import ceil
 from time import perf_counter
 
 import numpy as np
@@ -40,13 +42,11 @@ def train_models():
     seeds = generate_seeds(n_seeds=5, name='train_seeds', seed=seed)
 
     print("Training models...")
-    for i in range(5):
-        print(f"Iteration: {i}")
-        train_model('setcov', seeds[i])
-        train_model('combauc', seeds[i])
-        train_model('capfac', seeds[i])
-        train_model('indset', seeds[i])
-    print("Done!")
+    problems = ['setcov', 'combauc', 'capfac', 'indset']
+    for problem in problems:
+        for i in range(5):
+            print(f"Training a model for {problem} problems, iteration {i}...")
+            train_model(problem, seeds[i])
 
 
 def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_size=32, pretrain_batch_size=128,
@@ -55,7 +55,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
 
     On the first epoch, the model is pretrained. Afterwards, regular training commences. The learning rate is
     dynamically adapted using the *patience* parameter. Whenever the number of consecutive epochs without improvement
-    on the validation set exceeds our *patience*, the learning rate is divided by five. An early stopping criterium
+    on the validation set exceeds our *patience*, the learning rate is divided by five. An early stopping criterion
     is triggered when the number of consecutive epochs without improvement on the validation set exceeds the
     *early_stopping* parameter.
 
@@ -70,6 +70,9 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     :param patience: The number of epochs without improvement required before the learning rate is adapted.
     :param early_stopping: The number of epochs without improvement required before early stopping is triggered.
     """
+
+    # Start timer.
+    wall_start = perf_counter()
 
     fractions = np.array([0.25, 0.5, 0.75, 1])
 
@@ -123,9 +126,6 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
 
     # Initialize the model.
     model = GCNN()
-
-    # Start timer.
-    start_time = perf_counter()
 
     # Training loop.
     optimizer = Adam(learning_rate=lambda: lr)  # Dynamic learning rate.
@@ -182,7 +182,11 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     valid_loss, valid_acc = process(model, valid_data, fractions, loss_fn)
     write_log(f"BEST VALID LOSS: {valid_loss:.3e} " + "".join(
         [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
-    write_log(f"Training time: {perf_counter() - start_time} seconds", logfile)
+    write_log(f"Training time: {perf_counter() - wall_start} seconds", logfile)
+
+    print("Done!")
+    print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
+    print("")
 
 
 def pretrain(model: GCNN, dataloader: tf.data.Dataset):
@@ -315,4 +319,3 @@ if __name__ == '__main__':
     # Train the model.
     print(f"Training a model for {args.problem} problems, iteration {args.iteration}...")
     train_model(args.problem, train_seed)
-    print("Done!")

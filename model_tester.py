@@ -18,9 +18,14 @@ References
 """
 
 import csv
+import gzip
 import os
 import pathlib
+import pickle
 from argparse import ArgumentParser
+from datetime import timedelta
+from math import ceil
+from time import perf_counter
 
 import numpy as np
 import tensorflow as tf
@@ -36,25 +41,27 @@ def test_models():
     seeds = load_seeds(name='train_seeds')[:2]
 
     print("Testing models...")
-    for i in range(5):
-        print(f"Iteration: {i}")
-        test_model('setcov', seeds[i])
-        test_model('combauc', seeds[i])
-        test_model('capfac', seeds[i])
-        test_model('indset', seeds[i])
-    print("Done!")
+    problems = ['setcov', 'combauc', 'capfac', 'indset']
+    for problem in problems:
+        for i in range(5):
+            print(f"Testing a model for {problem} problems, iteration {i}...")
+            test_model(problem, seeds[i])
 
 
 def test_model(problem: str, seed: np.array, test_batch_size=128):
     """Tests a trained model on testing data and writes the results to a CSV file.
 
     The accuracy on given fractions of the cut candidate ranking is written to a CSV file. That is, how often the
-    model ranked the top x% of cut candidates correctly.
+    model ranked the top x% of cut candidates correctly. Besides this, the hybrid baseline cut selector is also
+    tested for comparison.
 
     :param problem: The problem type to be considered, one of: {'setcov', 'combauc', 'capfac', or 'indset'}.
     :param seed: A seed that was used for training a models.
     :param test_batch_size: The number of samples in each testing batch.
     """
+
+    # Start timer.
+    wall_start = perf_counter()
 
     fractions = np.array([0.25, 0.5, 0.75, 1])
 
@@ -85,13 +92,65 @@ def test_model(problem: str, seed: np.array, test_batch_size=128):
     test_data = test_data.map(load_batch_tf)
     test_data = test_data.prefetch(2)
 
+    # Test the model.
     test_acc = process(model, test_data, fractions)
 
-    fieldnames = ['seed', ] + [f'{100 * frac:.0f}%' for frac in fractions]
+    # Test the hybrid baseline cut selector.
+    baseline_acc = np.zeros(len(fractions))
+
+    # Load samples.
+    for filename in test_files:
+        with gzip.open(filename, 'rb') as file:
+            sample = pickle.load(file)
+
+            # Load (state, action) pair.
+            sample_state, sample_improvements = sample['data']
+
+            # Retrieve cut features.
+            sample_cons, sample_cons_edge, sample_var, sample_cut, sample_cut_edge = sample_state
+            cut_feats = sample_cut['values']
+            cut_feat_names = sample_cut['features']
+            int_support = cut_feats[:, cut_feat_names.index('int_support')]
+            efficacy = cut_feats[:, cut_feat_names.index('efficacy')]
+            cutoff = cut_feats[:, cut_feat_names.index('cutoff')]
+            parallelism = cut_feats[:, cut_feat_names.index('parallelism')]
+
+            # Compute cut quality scores.
+            if np.any(cutoff):
+                pred = efficacy + 0.1 * int_support + 0.1 * parallelism + 0.5 * cutoff
+            else:
+                pred = 1.5 * efficacy + 0.1 * int_support + 0.1 * parallelism
+
+            # Sort the cut indices based on the predicted and true bound improvements.
+            true = sample_improvements
+            pred_ranking = np.array(sorted(range(len(pred)), key=lambda x: pred[x], reverse=True))
+            true_ranking = np.array(sorted(range(len(true)), key=lambda x: true[x], reverse=True))
+
+            # Find the first index that deviates.
+            differences = (pred_ranking != true_ranking)
+            if np.any(differences):
+                deviation = np.argmax(pred_ranking != true_ranking)
+            else:
+                # No deviations.
+                deviation = len(pred)
+
+            # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
+            frac = deviation / len(pred)
+            baseline_acc += (frac >= fractions)
+    baseline_acc /= len(test_files)
+
+    fieldnames = ['type', 'seed', ] + [f'{100 * frac:.0f}%' for frac in fractions]
     with open(result_file, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerow({'seed': seed, **{f'{100 * k:.0f}%': test_acc[i] for i, k in enumerate(fractions)}})
+        writer.writerow(
+            {'type': 'gcnn', 'seed': seed, **{f'{100 * k:.0f}%': test_acc[i] for i, k in enumerate(fractions)}})
+        writer.writerow(
+            {'type': 'baseline', 'seed': seed, **{f'{100 * k:.0f}%': baseline_acc[i] for i, k in enumerate(fractions)}})
+
+    print("Done!")
+    print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
+    print("")
 
 
 def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
