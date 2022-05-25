@@ -386,6 +386,7 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
     # Remove temporary directory.
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    print(f"    - Done!")
     print(f"    - Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
     print(f"    - CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
 
@@ -454,10 +455,10 @@ if __name__ == '__main__':
                         default=cpu_count())
     args = parser.parse_args()
 
-    sample_count = {'train': 1000, 'valid': 200, 'test': 200}
+    sample_count = {'train': 100000, 'valid': 20000, 'test': 20000}
     problem_indices = {'setcov': 0, 'combauc': 1, 'capfac': 2, 'indset': 3}
     set_indices = {'train': 0, 'valid': 1, 'test': 2}
-    dims = {'setcov': '50r', 'combauc': '10i_50b', 'capfac': '10c', 'indset': '50n'}
+    dims = {'setcov': '500r', 'combauc': '100i_500b', 'capfac': '100c', 'indset': '500n'}
 
     # Generate all seeds for this module and get the one that corresponds to the specified problem.
     program_seed = load_seeds(name='program_seeds')[1]
@@ -484,4 +485,3 @@ if __name__ == '__main__':
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerow({'set': args.set, 'n_total': n_total, 'n_unique': n_unique})
-    print("Done!")

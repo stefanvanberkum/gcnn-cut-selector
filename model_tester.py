@@ -225,4 +225,3 @@ if __name__ == '__main__':
     # Train the model.
     print(f"Testing a model for {args.problem} problems, iteration {args.iteration}...")
     test_model(args.problem, test_seed)
-    print("Done!")
