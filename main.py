@@ -3,7 +3,7 @@
 from datetime import timedelta
 from math import ceil
 from multiprocessing import cpu_count
-from time import time
+from time import perf_counter
 
 from data_collector import collect_data
 from instance_generator import generate_instances
@@ -34,27 +34,27 @@ def main():
 
     generate_seeds(n_seeds=3, name='program_seeds', seed=seed)
 
-    start_time = time()
+    start_time = perf_counter()
 
     if generate:
         generate_instances(n_jobs)
-        print(f"Elapsed time: {str(timedelta(seconds=ceil(time() - start_time)))}\n")
+        print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
 
     if collect:
         collect_data(n_jobs)
-        print(f"Elapsed time: {str(timedelta(seconds=ceil(time() - start_time)))}\n")
+        print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
 
     if train:
         train_models()
-        print(f"Elapsed time: {str(timedelta(seconds=ceil(time() - start_time)))}\n")
+        print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
 
     if test:
         test_models()
-        print(f"Elapsed time: {str(timedelta(seconds=ceil(time() - start_time)))}\n")
+        print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
 
     if evaluate:
         evaluate_models(n_jobs)
-        print(f"Elapsed time: {str(timedelta(seconds=ceil(time() - start_time)))}\n")
+        print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
 
 
 if __name__ == '__main__':
