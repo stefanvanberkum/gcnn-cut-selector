@@ -3,6 +3,7 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
+  - numpy=1.22.3
   - pyscipopt=4.2.0
   - python=3.9.12
   - scipy=1.8.0
