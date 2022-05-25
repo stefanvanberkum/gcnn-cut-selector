@@ -477,7 +477,8 @@ if __name__ == '__main__':
     sampling_rng = np.random.default_rng(sampling_seed)
 
     print(f"Running {args.n_jobs} jobs in parallel.")
-    print(f"Collecting {args.problem} {args.set} set samples...")
+    print(f"Collecting {args.problem} instance data...")
+    print(f"  - Collecting {args.set} samples...")
     n_total, n_unique = collect_samples(filepaths, sample_count[args.set], args.n_jobs, output_dir, sampling_rng)
 
     fieldnames = ['set', 'n_total', 'n_unique']
