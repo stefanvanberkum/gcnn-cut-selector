@@ -66,7 +66,7 @@ class SamplingAgent(Cutsel):
     :ivar skip_factor: The factor that determines the high-quality threshold relative to the highest-quality cut.
     """
 
-    def __init__(self, episode: int, instance: str, out_queue: SimpleQueue, out_dir: str, seed: int, p_expert=0.01,
+    def __init__(self, episode: int, instance: str, out_queue: SimpleQueue, out_dir: str, seed: int, p_expert=0.05,
                  p_max=0.1, p_max_ub=0.5, skip_factor=0.9):
         self.episode = episode
         self.instance = instance
@@ -360,6 +360,7 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
                     current_episode += 1
                     n_instances += 1
                     unique.add(sample['instance'])
+                    print("sample done")
                 else:
                     # Write sample.
                     os.rename(sample['filename'], f'{out_dir}/sample_{i + 1}.pkl')
