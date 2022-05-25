@@ -386,7 +386,6 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
     # Remove temporary directory.
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    print(f"    - Done!")
     print(f"    - Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
     print(f"    - CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
 
