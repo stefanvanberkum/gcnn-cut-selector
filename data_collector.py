@@ -427,7 +427,7 @@ def generate_samples(task_queue, out_queue):
 
         # Initialize the model.
         model = Model()
-        init_scip(model, seed)
+        init_scip(model, seed, time_limit=300)
         model.readProblem(f'{instance}')
 
         # Include the sampling agent as cut selector to extract (state, action) pairs.
