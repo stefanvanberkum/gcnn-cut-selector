@@ -1,7 +1,7 @@
 name: gcnn-cut-selector
 channels:
   - conda-forge
-  - defaults
+  - nodefaults
 dependencies:
   - pyscipopt=4.2.0
   - python=3.9.*
