@@ -481,7 +481,7 @@ if __name__ == '__main__':
     n_total, n_unique = collect_samples(filepaths, sample_count[args.set], args.n_jobs, output_dir, sampling_rng)
 
     fieldnames = ['set', 'n_total', 'n_unique']
-    with open(f"data/samples/{args.problem}/{dimension}/{args.set}_stats.csv", 'w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
+    with open(f"data/samples/{args.problem}/{dimension}/{args.set}_stats.csv", 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerow({'set': args.set, 'n_total': n_total, 'n_unique': n_unique})
