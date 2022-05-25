@@ -360,7 +360,6 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
                     current_episode += 1
                     n_instances += 1
                     unique.add(sample['instance'])
-                    print("sample done")
                 else:
                     # Write sample.
                     os.rename(sample['filename'], f'{out_dir}/sample_{i + 1}.pkl')
