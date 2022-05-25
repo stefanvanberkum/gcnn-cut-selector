@@ -1,4 +1,0 @@
-numpy==1.22.3
-pyscipopt=4.2.0
-scipy==1.8.0
-tensorflow==2.7.1
