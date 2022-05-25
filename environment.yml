@@ -1,8 +1,9 @@
 name: gcnn-cut-selector
 channels:
   - conda-forge
+  - defaults
 dependencies:
-  - pyscipopt=4.2.0=py39h5a03fae_2
-  - python=3.9.12=h12debd9_0
-  - scipy=1.8.0=py39hee8e79c_1
+  - pyscipopt=4.2.0
+  - python=3.9
+  - scipy=1.8.0
   - tensorflow=2.7.1=cuda112py39h01bd6f0_0
