@@ -109,12 +109,6 @@ def train_model(problem: str, seed: int, max_epochs=1000, batch_size=128, pretra
     train_files = [str(x) for x in train_files]
     valid_files = [str(x) for x in valid_files]
 
-    # Prepare training dataset.
-    train_data = tf.data.Dataset.from_tensor_slices(train_files)
-    train_data = train_data.batch(batch_size)
-    train_data = train_data.map(load_batch_tf)
-    train_data = train_data.prefetch(1)
-
     # Prepare validation dataset.
     valid_data = tf.data.Dataset.from_tensor_slices(valid_files)
     valid_data = valid_data.batch(valid_batch_size)
@@ -147,6 +141,15 @@ def train_model(problem: str, seed: int, max_epochs=1000, batch_size=128, pretra
             # Compile the model call as TensorFlow function for performance.
             model.call = tf.function(model.call, input_signature=model.input_signature)
         else:
+            # Shuffle training files.
+            rng.shuffle(train_files)
+
+            # Prepare training dataset.
+            train_data = tf.data.Dataset.from_tensor_slices(train_files)
+            train_data = train_data.batch(batch_size)
+            train_data = train_data.map(load_batch_tf)
+            train_data = train_data.prefetch(1)
+
             # Train the model.
             train_loss, train_acc = process(model, train_data, fractions, loss_fn, optimizer)
             write_log(f"TRAIN LOSS: {train_loss:.3e} " + "".join(
