@@ -49,8 +49,8 @@ def train_models():
             train_model(problem, seeds[i])
 
 
-def train_model(problem: str, seed: int, max_epochs=1000, batch_size=128, pretrain_batch_size=128, valid_batch_size=128,
-                lr=0.001, patience=10, early_stopping=20):
+def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_size=32, pretrain_batch_size=32,
+                valid_batch_size=32, lr=0.001, patience=10, early_stopping=20):
     """Trains a model.
 
     On the first epoch, the model is pretrained. Afterwards, regular training commences. The learning rate is
@@ -62,6 +62,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, batch_size=128, pretra
     :param problem: The problem type to be considered, one of: {'setcov', 'combauc', 'capfac', or 'indset'}.
     :param seed: A seed value for the random number generator.
     :param max_epochs: The maximum number of epochs.
+    :param epoch_size: The number of batches in each epoch.
     :param batch_size: The number of samples in each training batch.
     :param pretrain_batch_size: The number of samples in each pretraining batch.
     :param valid_batch_size: The number of samples in each validation batch.
@@ -88,6 +89,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, batch_size=128, pretra
     write_log(f"problem: {problem}", logfile)
     write_log(f"seed: {seed}", logfile)
     write_log(f"max_epochs: {max_epochs}", logfile)
+    write_log(f"epoch_size: {epoch_size}", logfile)
     write_log(f"batch_size: {batch_size}", logfile)
     write_log(f"pretrain_batch_size: {pretrain_batch_size}", logfile)
     write_log(f"valid_batch_size: {valid_batch_size}", logfile)
@@ -141,11 +143,11 @@ def train_model(problem: str, seed: int, max_epochs=1000, batch_size=128, pretra
             # Compile the model call as TensorFlow function for performance.
             model.call = tf.function(model.call, input_signature=model.input_signature)
         else:
-            # Shuffle training files.
-            rng.shuffle(train_files)
+            # Sample training files with replacement.
+            epoch_train_files = rng.choice(train_files, epoch_size * batch_size, replace=True)
 
             # Prepare training dataset.
-            train_data = tf.data.Dataset.from_tensor_slices(train_files)
+            train_data = tf.data.Dataset.from_tensor_slices(epoch_train_files)
             train_data = train_data.batch(batch_size)
             train_data = train_data.map(load_batch_tf)
             train_data = train_data.prefetch(1)

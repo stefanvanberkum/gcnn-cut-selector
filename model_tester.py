@@ -48,7 +48,7 @@ def test_models():
             test_model(problem, seeds[i])
 
 
-def test_model(problem: str, seed: np.array, test_batch_size=128):
+def test_model(problem: str, seed: np.array, test_batch_size=64):
     """Tests a trained model on testing data and writes the results to a CSV file.
 
     The accuracy on given fractions of the cut candidate ranking is written to a CSV file. That is, how often the
