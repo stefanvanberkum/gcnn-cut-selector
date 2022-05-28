@@ -206,7 +206,7 @@ class GCNN(BaseModel):
         # Output.
         self.output_module = Sequential(
             [Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal', name='out_1'),
-             Dense(units=1, activation='relu', kernel_initializer='orthogonal', name='out_2')])
+             Dense(units=1, kernel_initializer='orthogonal', name='out_2')])
 
         # Build the model right away.
         self.build([(None, self.cons_feats), (2, None), (None, self.edge_feats), (None, self.var_feats),
