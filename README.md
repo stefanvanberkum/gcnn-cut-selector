@@ -23,6 +23,9 @@ parallelization wherever possible.
 The ```main.py``` module can be used to run all the experiments, simply by specifying what should be run in the run
 configurations.
 
+_Note._ When using GPU for TensorFlow, if any memory errors occur during model training, restarting your computer might
+help.
+
 ### Command line
 
 The following commands can be used to run all the experiments.
