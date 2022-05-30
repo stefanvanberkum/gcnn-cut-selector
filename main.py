@@ -10,6 +10,7 @@ from instance_generator import generate_instances
 from model_evaluator import evaluate_models
 from model_tester import test_models
 from model_trainer import train_models
+from summarizer import summarize_stats
 from utils import generate_seeds
 
 
@@ -28,6 +29,7 @@ def main():
     train = True
     test = True
     evaluate = False  # This needs to be run separately as TensorFlow cannot disable GPU mid-execution.
+    summarize = False
     seed = 0
 
     n_jobs = cpu_count()
@@ -54,6 +56,10 @@ def main():
 
     if evaluate:
         evaluate_models(n_jobs)
+        print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
+
+    if summarize:
+        summarize_stats()
         print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
 
 
