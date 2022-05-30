@@ -207,7 +207,7 @@ def evaluate_models(n_jobs: int):
     difficulties = ['hard', 'medium', 'easy']
     problems = ['setcov', 'combauc', 'capfac', 'indset']
     cut_selectors = ['hybrid', 'gcnn']
-    seeds = load_seeds(name='train_seeds')[:2]
+    seeds = load_seeds(name='train_seeds')
 
     # Disable GPU for fair measurement.
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'

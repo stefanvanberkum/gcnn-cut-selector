@@ -38,7 +38,7 @@ from utils import load_batch_tf, load_seeds
 def test_models():
     """Tests the models in accordance with our testing scheme."""
 
-    seeds = load_seeds(name='train_seeds')[:2]
+    seeds = load_seeds(name='train_seeds')
 
     print("Testing models...")
     problems = ['setcov', 'combauc', 'capfac', 'indset']
@@ -48,7 +48,7 @@ def test_models():
             test_model(problem, seeds[i])
 
 
-def test_model(problem: str, seed: np.array, test_batch_size=64):
+def test_model(problem: str, seed: np.array, test_batch_size=32):
     """Tests a trained model on testing data and writes the results to a CSV file.
 
     The accuracy on given fractions of the cut candidate ranking is written to a CSV file. That is, how often the
