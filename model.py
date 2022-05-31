@@ -38,10 +38,10 @@ class BaseModel(Model):
     - :meth:`restore_state`: Restore a stored state.
     - :meth:`pretrain_init`: Initialize pretraining.
     - :meth:`pretrain_init_rec`: Recursively initialize the pretraining for prenorm layers in the model.
-    - :meth:`pretrain_next`: Finds a prenorm layer that has received updates but has not yet stopped pretraining.
-    - :meth:`pretrain_next_rec`: Recursively finds a prenorm layer that has received updates but has not yet stopped
+    - :meth:`pretrain_next`: Find a prenorm layer that has received updates but has not yet stopped pretraining.
+    - :meth:`pretrain_next_rec`: Recursively find a prenorm layer that has received updates but has not yet stopped
         pretraining.
-    - :meth:`pretrain`: Pretrains the model.
+    - :meth:`pretrain`: Pretrain the model.
     """
 
     def save_state(self, path: str):
@@ -87,7 +87,7 @@ class BaseModel(Model):
                 layer.start_updates()
 
     def pretrain_next(self):
-        """Finds a prenorm layer that has received updates but has not yet stopped pretraining.
+        """Find a prenorm layer that has received updates but has not yet stopped pretraining.
 
         Used in a pretraining loop, has no direct interpretation. See :func:`model_trainer.pretrain` for it's usage.
 
@@ -98,7 +98,7 @@ class BaseModel(Model):
 
     @staticmethod
     def pretrain_next_rec(model: Model, name: str):
-        """Recursively finds a prenorm layer that has received updates but has not yet stopped pretraining.
+        """Recursively find a prenorm layer that has received updates but has not yet stopped pretraining.
 
         :param model: The model to search for prenorm layers.
         :param name: The name of the model.
@@ -117,7 +117,7 @@ class BaseModel(Model):
         return None
 
     def pretrain(self, *args, **kwargs):
-        """Pretrains the model.
+        """Pretrain the model.
 
         :param args: Arguments used to call the model.
         :param kwargs: Keyword arguments used to call the model.
@@ -140,9 +140,8 @@ class GCNN(BaseModel):
 
     Methods
     =======
-    - :meth:`build`: Builds the model.
-    - :meth:`call`: Calls the model on inputs and returns outputs.
-    - :meth:`pad_output`: Pads the model output in case the input shape differs between batch instances.
+    - :meth:`build`: Build the model.
+    - :meth:`call`: Call the model on inputs and return outputs.
 
     :ivar emb_size: The embedding size of each feature vector.
     :ivar cons_feats: The number of features for each constraint or added cut (row).
@@ -227,7 +226,7 @@ class GCNN(BaseModel):
                                  tf.TensorSpec(shape=[], dtype=tf.int32)), tf.TensorSpec(shape=[], dtype=tf.bool)]
 
     def build(self, input_shapes: list):
-        """Builds the model.
+        """Build the model.
 
         Input is of the form [*c_shape*, *ei_shape*, *e_shape*, *v_shape*, *k_shape*], with the following parameters:
 
@@ -256,7 +255,7 @@ class GCNN(BaseModel):
             self.built = True
 
     def call(self, inputs, training):
-        """Calls the model using the specified input.
+        """Call the model using the specified input.
 
         Accepts stacked mini-batches, in which case the number of candidate cuts per sample has to be provided,
         and the output consists of a padded tensor of size (*n_samples*, *max_cuts*).
@@ -310,8 +309,8 @@ class PreNormLayer(Layer):
 
     Methods
     =======
-    - :meth:`build`: Called when the layer is initialized, before the layer is called.
-    - :meth:`call`: The layer's call function.
+    - :meth:`build`: Build the layer.
+    - :meth:`call`: Call the layer on inputs and return outputs.
     - :meth:`start_updates`: Initialize the pretraining phase.
     - :meth:`update_params`: Update parameters in pretraining.
     - :meth:`stop_updates`: End pretraining and fix the layer's parameters.
@@ -356,7 +355,7 @@ class PreNormLayer(Layer):
         self.count = None
 
     def build(self, input_shapes):
-        """Called when the layer is initialized, before the layer is called.
+        """Build the layer.
 
         :param input_shapes: An instance of TensorShape or a list of these objects.
         """
@@ -364,7 +363,7 @@ class PreNormLayer(Layer):
         self.built = True
 
     def call(self, inputs, *args, **kwargs):
-        """The layer's call function.
+        """Call the layer on inputs and return outputs.
 
         :param inputs: An input tensor.
         :return: The shifted and/or scaled input.
@@ -463,8 +462,8 @@ class PartialGraphConvolution(Model):
 
     Methods
     =======
-    - :meth:`build`: Builds the model.
-    - :meth:`call`: Calls the model on inputs and returns outputs.
+    - :meth:`build`: Build the model.
+    - :meth:`call`: Call the model on inputs and return outputs.
 
     :ivar emb_size: The embedding size of each feature vector.
     :ivar name: The name of this convolution.
@@ -509,7 +508,7 @@ class PartialGraphConvolution(Model):
              Dense(units=self.emb_size, activation='relu', kernel_initializer='orthogonal', name=f'{name}_out_2')])
 
     def build(self, input_shapes):
-        """Builds the model.
+        """Build the model.
 
         Input is of the form [*l_shape*, *ei_shape*, *e_shape, *v_shape*], with the following parameters:
 
@@ -532,7 +531,7 @@ class PartialGraphConvolution(Model):
         self.built = True
 
     def call(self, inputs, training):
-        """Calls the model using the specified input, and performs a partial graph convolution.
+        """Call the model using the specified input, and perform a partial graph convolution.
 
         Input is of the form [*left_features*, *edge_indices*, *edge_features*, *variable_features*, *out_size*],
         with the following parameters:

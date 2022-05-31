@@ -6,9 +6,9 @@ This module provides methods for testing a trained GCNN model. The methods in th
 
 Functions
 =========
-- :func:`test_models`: Tests the models in accordance with our testing scheme.
-- :func:`test_model`: Tests a trained model on testing data and writes the results to a CSV file.
-- :func:`process`: Runs the input data through a trained model.
+- :func:`test_models`: Test the models in accordance with our testing scheme.
+- :func:`test_model`: Test a trained model on testing data and write the results to a CSV file.
+- :func:`process`: Run the input data through a trained model.
 
 References
 ==========
@@ -18,9 +18,9 @@ References
 """
 
 import csv
+import glob
 import gzip
 import os
-import pathlib
 import pickle
 from argparse import ArgumentParser
 from datetime import timedelta
@@ -36,7 +36,7 @@ from utils import load_batch_tf, load_seeds
 
 
 def test_models():
-    """Tests the models in accordance with our testing scheme."""
+    """Test the models in accordance with our testing scheme."""
 
     seeds = load_seeds(name='train_seeds')
 
@@ -49,7 +49,7 @@ def test_models():
 
 
 def test_model(problem: str, seed: np.array, test_batch_size=32):
-    """Tests a trained model on testing data and writes the results to a CSV file.
+    """Test a trained model on testing data and write the results to a CSV file.
 
     The accuracy on given fractions of the cut candidate ranking is written to a CSV file. That is, how often the
     model ranked the top x% of cut candidates correctly. Besides this, the hybrid baseline cut selector is also
@@ -73,8 +73,7 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     result_file = f"results/test/{problem}/{seed}.csv"
 
     # Retrieve testing samples.
-    test_files = list(pathlib.Path(f"data/samples/{problem_folder}/test").glob('sample_*.pkl'))
-    test_files = [str(x) for x in test_files]
+    test_files = glob.glob(f"data/samples/{problem_folder}/test/sample_*.pkl")
 
     # Compile the model call as TensorFlow function for performance.
     model = GCNN()
@@ -154,7 +153,7 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
 
 
 def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
-    """Runs the input data through a trained model.
+    """Run the input data through a trained model.
 
     :param model: The trained model.
     :param dataloader: The input dataset to process.
@@ -176,35 +175,40 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
                          cut_edge_feats, n_cons_total, n_vars_total, n_cuts_total
         batch_size = len(n_cons.numpy())
 
-        predictions = model(batched_states, tf.convert_to_tensor(False))
+        try:
+            predictions = model(batched_states, tf.convert_to_tensor(False))
 
-        # Measure how often the model ranks the highest-quality cuts correctly.
-        predictions = tf.split(value=predictions, num_or_size_splits=n_cuts)
-        improvements = tf.split(value=improvements, num_or_size_splits=n_cuts)
+            # Measure how often the model ranks the highest-quality cuts correctly.
+            predictions = tf.split(value=predictions, num_or_size_splits=n_cuts)
+            improvements = tf.split(value=improvements, num_or_size_splits=n_cuts)
 
-        acc = np.zeros(len(fractions))
-        for i in range(batch_size):
-            pred = predictions[i].numpy()
-            true = improvements[i].numpy()
+            acc = np.zeros(len(fractions))
+            for i in range(batch_size):
+                pred = predictions[i].numpy()
+                true = improvements[i].numpy()
 
-            # Sort the cut indices based on the predicted and true bound improvements.
-            pred_ranking = np.array(sorted(range(len(pred)), key=lambda x: pred[x], reverse=True))
-            true_ranking = np.array(sorted(range(len(true)), key=lambda x: true[x], reverse=True))
+                # Sort the cut indices based on the predicted and true bound improvements.
+                pred_ranking = np.array(sorted(range(len(pred)), key=lambda x: pred[x], reverse=True))
+                true_ranking = np.array(sorted(range(len(true)), key=lambda x: true[x], reverse=True))
 
-            # Find the first index that deviates.
-            differences = (pred_ranking != true_ranking)
-            if np.any(differences):
-                deviation = np.argmax(pred_ranking != true_ranking)
-            else:
-                # No deviations.
-                deviation = len(pred)
+                # Find the first index that deviates.
+                differences = (pred_ranking != true_ranking)
+                if np.any(differences):
+                    deviation = np.argmax(pred_ranking != true_ranking)
+                else:
+                    # No deviations.
+                    deviation = len(pred)
 
-            # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
-            frac = deviation / len(pred)
-            acc += (frac >= fractions)
+                # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
+                frac = deviation / len(pred)
+                acc += (frac >= fractions)
 
-        mean_acc += acc
-        n_samples += batch_size
+            mean_acc += acc
+            n_samples += batch_size
+        except tf.errors.ResourceExhaustedError:
+            # Skip batch if it's too large.
+            print("WARNING: batch skipped.")
+            pass
 
     mean_acc /= n_samples
 

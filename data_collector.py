@@ -11,9 +11,9 @@ Classes
 
 Functions
 =========
-- :func:`collect_data`: Collects data in accordance with our sampling scheme.
-- :func:`collect_problem`: Collects samples for a single problem type.
-- :func:`collect_samples`: Runs branch-and-cut episodes on the given set of instances, and collects randomly queried
+- :func:`collect_data`: Collect data in accordance with our sampling scheme.
+- :func:`collect_problem`: Collect samples for a single problem type.
+- :func:`collect_samples`: Run branch-and-cut episodes on the given set of instances, and collects randomly queried
   (state, action) pairs from an expert decision rule based on bound improvement.
 - :func:`send_tasks`: Dispatcher loop: continuously send tasks to the task queue.
 - :func:`generate_samples`: Worker loop: fetch an instance, run an episode, and send samples to the out queue.
@@ -287,7 +287,7 @@ def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir
 
 
 def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: str, rng: np.random.Generator):
-    """Runs branch-and-cut episodes on the given set of instances, and collects randomly queried (state,
+    """Run branch-and-cut episodes on the given set of instances, and collects randomly queried (state,
     action) pairs from an expert decision rule based on bound improvement.
 
     The sampling is parallelized over multiple cores. A dispatcher sends tasks to a task queue, which are then

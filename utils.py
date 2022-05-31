@@ -6,12 +6,12 @@ This module provides general utility methods. The methods in this module are bas
 
 Functions
 =========
-- :func:`get_state`: Extracts the graph representation of the problem at the current solver state.
-- :func:`get_objcos`: Computes the cosine similarity between a row and the objective function.
-- :func:`init_scip`: Initializes the SCIP model parameters.
-- :func:`load_batch_tf`: Loads a batch of samples for use in TensorFlow models.
+- :func:`get_state`: Extract the graph representation of the problem at the current solver state.
+- :func:`get_objcos`: Compute the cosine similarity between a row and the objective function.
+- :func:`init_scip`: Initialize the SCIP model parameters.
+- :func:`load_batch_tf`: Load a batch of samples for use in TensorFlow models.
 - :func:`load_batch`: Load and concatenate samples into one stacked mini-batch, for use in a GCNN model.
-- :func:`write_log`: Writes the specified text to a log file.
+- :func:`write_log`: Write the specified text to a log file.
 
 References
 ==========
@@ -33,7 +33,7 @@ import tensorflow as tf
 
 
 def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
-    """Extracts the graph representation of the problem at the current solver state.
+    """Extract the graph representation of the problem at the current solver state.
 
     The nodes in this graph are the constraints, variables, and cut candidates. Constraints and cuts are connected to
     a variable if and only if this variable appears in the row (cut or constraint).
@@ -235,7 +235,7 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
 
 
 def get_objcos(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
-    """Computes the cosine similarity between a row and the objective function.
+    """Compute the cosine similarity between a row and the objective function.
 
     :param row: The row.
     :param row_norm: The norm of the row.
@@ -250,7 +250,7 @@ def get_objcos(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
 
 
 def init_scip(model: pyscipopt.scip.Model, seed: int, time_limit=3600, cpu_time=False):
-    """Initializes the SCIP model parameters.
+    """Initialize the SCIP model parameters.
 
     :param model: The SCIP model to be initialized.
     :param time_limit: The time limit for solving.
@@ -282,7 +282,7 @@ def init_scip(model: pyscipopt.scip.Model, seed: int, time_limit=3600, cpu_time=
 
 
 def generate_seeds(n_seeds: int, name: str, seed: int):
-    """Generates seeds and saves them for later use.
+    """Generate seeds and save them for later use.
 
     The seeds are stored to both a NumPy and CSV file.
 
@@ -304,7 +304,7 @@ def generate_seeds(n_seeds: int, name: str, seed: int):
 
 
 def load_seeds(name: str):
-    """Loads the previously generated seeds.
+    """Load previously generated seeds.
 
     :param name: The name of the seeds to be loaded.
     :return: A numpy array containing the seeds.
@@ -314,7 +314,7 @@ def load_seeds(name: str):
 
 
 def load_batch_tf(x):
-    """Loads a batch of samples, following :func:`load_batch`.
+    """Load a batch of samples, following :func:`load_batch`.
 
     See :func:`load_batch` for further documentation.
 
@@ -418,7 +418,7 @@ def load_batch(sample_files):
 
 
 def write_log(text, logfile):
-    """Writes the specified text to a log file.
+    """Write the specified text to a log file.
 
     :param text: The text to be logged.
     :param logfile: The path to the log file.

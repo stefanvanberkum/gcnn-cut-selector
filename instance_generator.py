@@ -11,10 +11,13 @@ Classes
 
 Functions
 =========
-- :func:`generate_setcov`: Generates a random set cover problem instance.
-- :func:`generate_combauc`: Generates a random combinatorial auction problem instance.
-- :func:`generate_capfac`: Generates a random capacitated facility location problem instance.
-- :func:`generate_indset`: Generates a random maximum independent set problem instance.
+- :func:`generate_instances`: Generate instances in accordance with our data generation scheme.
+- :func:`make_dirs`: Create all directories.
+- :func:`process_tasks`: Worker loop: fetch a task and generate the corresponding instance.
+- :func:`generate_setcov`: Generate a random set cover problem instance.
+- :func:`generate_combauc`: Generate a random combinatorial auction problem instance.
+- :func:`generate_capfac`: Generate a random capacitated facility location problem instance.
+- :func:`generate_indset`: Generate a random maximum independent set problem instance.
 
 References
 ==========

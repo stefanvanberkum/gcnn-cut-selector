@@ -6,10 +6,10 @@ This module provides methods for training the GCNN model. The methods in this mo
 
 Functions
 =========
-- :func:`train_models`: Trains the models in accordance with our training scheme.
-- :func:`train_model`: Trains a model.
-- :func:`pretrain`: Pretrains a model.
-- :func:`process`: Runs the input data through a model, training it if an optimizer is provided.
+- :func:`train_models`: Train the models in accordance with our training scheme.
+- :func:`train_model`: Train a model.
+- :func:`pretrain`: Pretrain a model.
+- :func:`process`: Run the input data through a model, training it if an optimizer is provided.
 
 References
 ==========
@@ -18,8 +18,8 @@ References
     https://proceedings.neurips.cc/paper/2019/hash/d14c2267d848abeb81fd590f371d39bd-Abstract.html
 """
 
+import glob
 import os
-import pathlib
 from argparse import ArgumentParser
 from datetime import timedelta
 from math import ceil
@@ -36,7 +36,7 @@ from utils import generate_seeds, load_batch_tf, load_seeds, write_log
 
 
 def train_models():
-    """Trains the models in accordance with our training scheme."""
+    """Train the models in accordance with our training scheme."""
 
     seed = load_seeds(name='program_seeds')[2]
     seeds = generate_seeds(n_seeds=5, name='train_seeds', seed=seed)
@@ -45,13 +45,13 @@ def train_models():
     problems = ['setcov', 'combauc', 'capfac', 'indset']
     for problem in problems:
         for i in range(5):
-            print(f"Training a model for {problem} problems, iteration {i}...")
+            print(f"Training a model for {problem} problems, iteration {i + 1}...")
             train_model(problem, seeds[i])
 
 
 def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_size=32, pretrain_batch_size=32,
                 valid_batch_size=32, lr=0.001, patience=10, early_stopping=20):
-    """Trains a model.
+    """Train a model.
 
     On the first epoch, the model is pretrained. Afterwards, regular training commences. The learning rate is
     dynamically adapted using the *patience* parameter. Whenever the number of consecutive epochs without improvement
@@ -102,14 +102,11 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     tf.random.set_seed(rng.integers(np.iinfo(int).max))
 
     # Retrieve training and validation samples.
-    train_files = list(pathlib.Path(f'data/samples/{problem_folder}/train').glob('sample_*.pkl'))
-    valid_files = list(pathlib.Path(f'data/samples/{problem_folder}/valid').glob('sample_*.pkl'))
+    train_files = glob.glob(f"data/samples/{problem_folder}/train/sample_*.pkl")
+    valid_files = glob.glob(f"data/samples/{problem_folder}/valid/sample_*.pkl")
 
     write_log(f"{len(train_files)} training samples", logfile)
     write_log(f"{len(valid_files)} validation samples", logfile)
-
-    train_files = [str(x) for x in train_files]
-    valid_files = [str(x) for x in valid_files]
 
     # Prepare validation dataset.
     valid_data = tf.data.Dataset.from_tensor_slices(valid_files)
@@ -190,7 +187,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
 
 
 def pretrain(model: GCNN, dataloader: tf.data.Dataset):
-    """Pretrains a model.
+    """Pretrain a model.
 
     This function pretrains the model layer-by-layer. So on each iteration, all batches are used to pretrain the
     first available prenorm layer that is still open for updates. Then, this layer is found by calling
@@ -215,10 +212,14 @@ def pretrain(model: GCNN, dataloader: tf.data.Dataset):
             n_cuts_total = tf.reduce_sum(n_cuts)
             batched_states = cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, \
                              cut_edge_feats, n_cons_total, n_vars_total, n_cuts_total
-
-            if not model.pretrain(batched_states, tf.convert_to_tensor(True)):
-                # No layer receives any updates anymore.
-                break
+            try:
+                if not model.pretrain(batched_states, tf.convert_to_tensor(True)):
+                    # No layer receives any updates anymore.
+                    break
+            except tf.errors.ResourceExhaustedError:
+                # Skip batch if it's too large.
+                print("WARNING: batch skipped.")
+                pass
 
         # Find the layer we just pretrained and turn off updating for this layer.
         res = model.pretrain_next()
@@ -231,7 +232,7 @@ def pretrain(model: GCNN, dataloader: tf.data.Dataset):
 
 
 def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, loss_fn, optimizer=None):
-    """Runs the input data through a model, training it if an optimizer is provided.
+    """Run the input data through a model, training it if an optimizer is provided.
 
     :param model: The model.
     :param dataloader: The input dataset to process.
@@ -256,46 +257,51 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, loss_
                          cut_edge_feats, n_cons_total, n_vars_total, n_cuts_total
         batch_size = len(n_cons.numpy())
 
-        if optimizer:
-            # Train the model.
-            with tf.GradientTape() as tape:
-                predictions = model(batched_states, tf.convert_to_tensor(True))
-                loss = loss_fn(improvements, predictions)
-            grads = tape.gradient(target=loss, sources=model.trainable_variables)
-            optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        else:
-            # Evaluate the model.
-            predictions = model(batched_states, tf.convert_to_tensor(False))
-            loss = loss_fn(improvements, predictions)
-
-        # Measure how often the model ranks the highest-quality cuts correctly.
-        predictions = tf.split(value=predictions, num_or_size_splits=n_cuts)
-        improvements = tf.split(value=improvements, num_or_size_splits=n_cuts)
-
-        acc = np.zeros(len(fractions))
-        for i in range(batch_size):
-            pred = predictions[i].numpy()
-            true = improvements[i].numpy()
-
-            # Sort the cut indices based on the predicted and true bound improvements.
-            pred_ranking = np.array(sorted(range(len(pred)), key=lambda x: pred[x], reverse=True))
-            true_ranking = np.array(sorted(range(len(true)), key=lambda x: true[x], reverse=True))
-
-            # Find the first index that deviates.
-            differences = (pred_ranking != true_ranking)
-            if np.any(differences):
-                deviation = np.argmax(pred_ranking != true_ranking)
+        try:
+            if optimizer:
+                # Train the model.
+                with tf.GradientTape() as tape:
+                    predictions = model(batched_states, tf.convert_to_tensor(True))
+                    loss = loss_fn(improvements, predictions)
+                grads = tape.gradient(target=loss, sources=model.trainable_variables)
+                optimizer.apply_gradients(zip(grads, model.trainable_variables))
             else:
-                # No deviations.
-                deviation = len(pred)
+                # Evaluate the model.
+                predictions = model(batched_states, tf.convert_to_tensor(False))
+                loss = loss_fn(improvements, predictions)
 
-            # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
-            frac = deviation / len(pred)
-            acc += (frac >= fractions)
+            # Measure how often the model ranks the highest-quality cuts correctly.
+            predictions = tf.split(value=predictions, num_or_size_splits=n_cuts)
+            improvements = tf.split(value=improvements, num_or_size_splits=n_cuts)
 
-        mean_loss += loss.numpy() * batch_size
-        mean_acc += acc
-        n_samples += batch_size
+            acc = np.zeros(len(fractions))
+            for i in range(batch_size):
+                pred = predictions[i].numpy()
+                true = improvements[i].numpy()
+
+                # Sort the cut indices based on the predicted and true bound improvements.
+                pred_ranking = np.array(sorted(range(len(pred)), key=lambda x: pred[x], reverse=True))
+                true_ranking = np.array(sorted(range(len(true)), key=lambda x: true[x], reverse=True))
+
+                # Find the first index that deviates.
+                differences = (pred_ranking != true_ranking)
+                if np.any(differences):
+                    deviation = np.argmax(pred_ranking != true_ranking)
+                else:
+                    # No deviations.
+                    deviation = len(pred)
+
+                # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
+                frac = deviation / len(pred)
+                acc += (frac >= fractions)
+
+            mean_loss += loss.numpy() * batch_size
+            mean_acc += acc
+            n_samples += batch_size
+        except tf.errors.ResourceExhaustedError:
+            # Skip batch if it's too large.
+            print("WARNING: batch skipped.")
+            pass
 
     mean_loss /= n_samples
     mean_acc /= n_samples

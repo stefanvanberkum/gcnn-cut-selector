@@ -1,9 +1,10 @@
-"""This module provides methods for evaluating the performance of our GCNN approach.
+"""This module provides methods for benchmarking the performance of our GCNN approach.
 
 Summary
 =======
-This module provides methods for evaluating the performance of our GCNN approach, compared to a hybrid cut selector
-as implemented in SCIP.
+This module provides methods for benchmarking the performance of our GCNN approach, compared to a hybrid cut selector
+as implemented in SCIP. Benchmarking is performed with respect to the MIPLIB 2010 benchmark test set (or any other
+downloaded set, as long as it's placed under data/benchmarking).
 
 Classes
 ========
@@ -11,11 +12,13 @@ Classes
 
 Functions
 =========
-- :func:`evaluate_models`: Evaluate the models in accordance with our evaluation scheme.
-- :func:`process_tasks`: Worker loop: fetch a task and evaluate the given model on the given evaluation instance.
+- :func:`benchmark_models`: Benchmark the models in accordance with our benchmarking scheme and write the results to
+    a CSV file.
+- :func:`process_tasks`: Worker loop: fetch a task and evaluate the given model on the given benchmark instance.
 """
 
 import csv
+import glob
 import os
 from argparse import ArgumentParser
 from datetime import timedelta
@@ -158,19 +161,18 @@ class CustomCutsel(Cutsel):
         return {'cuts': sorted_cuts, 'nselectedcuts': min(n_selected, maxnselectedcuts), 'result': SCIP_RESULT.SUCCESS}
 
 
-def evaluate_models(n_jobs: int):
-    """Evaluate the models in accordance with our evaluation scheme and write the results to a CSV file.
+def benchmark_models(n_jobs: int):
+    """Benchmark the models in accordance with our benchmarking scheme and write the results to a CSV file.
 
-    The model evaluation is parallelized over multiple cores. Tasks are first sent to a queue, and then processed by
-    the workers.
+    The benchmarking is parallelized over multiple cores. Tasks are first sent to a queue, and then processed by the
+    workers.
 
     The CSV file contains the following information:
 
-    - problem: The problem type of the evaluated instance, one of {'setcov', 'combauc', 'capfac', 'indset'}.
-    - difficulty: The difficulty level of the evaluated instance, one of {'easy', 'medium', 'hard'}.
-    - instance: The instance number considered.
+    - problem: The problem type that was used to train the model, one of {'setcov', 'combauc', 'capfac', 'indset'}.
     - selector: The cut selector used, either 'hybrid' or 'gcnn'.
     - seed: The seed value that was used to train the model.
+    - instance: The name of the benchmarking instance considered.
     - n_nodes: The number of nodes processed during solving.
     - n_lps: The number of LPs solved during solving.
     - solve_time: The solving time in CPU seconds.
@@ -189,18 +191,13 @@ def evaluate_models(n_jobs: int):
     wall_start = perf_counter()
     proc_start = process_time()
 
-    print("Evaluating models...")
+    print("Benchmarking models...")
 
-    setcov_folders = {'easy': 'setcov/eval_500r', 'medium': 'setcov/eval_1000r', 'hard': 'setcov/eval_2000r'}
-    combauc_folders = {'easy': 'combauc/eval_100i_500b', 'medium': 'combauc/eval_200i_1000b',
-                       'hard': 'combauc/eval_300i_1500b'}
-    capfac_folders = {'easy': 'capfac/eval_100c', 'medium': 'capfac/eval_200c', 'hard': 'capfac/eval_400c'}
-    indset_folders = {'easy': 'indset/eval_500n', 'medium': 'indset/eval_1000n', 'hard': 'indset/eval_1500n'}
-    folders = {'setcov': setcov_folders, 'combauc': combauc_folders, 'capfac': capfac_folders, 'indset': indset_folders}
+    # Load the (MIPLIB 2010) benchmark set.
+    instances = glob.glob(f"data/benchmarking/*.mps")
 
     os.makedirs('results', exist_ok=True)
 
-    difficulties = ['hard', 'medium', 'easy']
     problems = ['setcov', 'combauc', 'capfac', 'indset']
     cut_selectors = ['hybrid', 'gcnn']
     seeds = load_seeds(name='train_seeds')
@@ -212,15 +209,12 @@ def evaluate_models(n_jobs: int):
     # Schedule jobs (hard to easy in order to minimize the number of idle CPU cores).
     manager = Manager()
     task_queue = manager.Queue()
-    for difficulty in difficulties:
-        for problem in problems:
-            problem_folders = folders[problem]
-            folder = problem_folders[difficulty]
-            instances = [{'number': i + 1, 'path': f"data/instances/{folder}/instance_{i + 1}.lp"} for i in range(20)]
-            for instance in instances:
-                for selector in cut_selectors:
-                    for seed in seeds:
-                        task_queue.put((problem, difficulty, instance['number'], instance['path'], selector, seed))
+    for problem in problems:
+        for selector in cut_selectors:
+            for seed in seeds:
+                for instance in instances:
+                    name, _ = os.path.splitext(os.path.basename(instance))
+                    task_queue.put((problem, selector, seed, name, instance))
 
     # Append worker termination signals to the queue.
     for i in range(n_jobs):
@@ -242,9 +236,9 @@ def evaluate_models(n_jobs: int):
     out_queue.put('end')
 
     # Write the results to a CSV file.
-    fieldnames = ['problem', 'difficulty', 'instance', 'selector', 'seed', 'n_nodes', 'n_lps', 'solve_time', 'gap',
-                  'status', 'wall_time', 'process_time']
-    with open('results/eval.csv', 'w', newline='') as file:
+    fieldnames = ['problem', 'selector', 'seed', 'instance', 'n_nodes', 'n_lps', 'solve_time', 'gap', 'status',
+                  'wall_time', 'process_time']
+    with open('results/benchmark.csv', 'w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -255,19 +249,18 @@ def evaluate_models(n_jobs: int):
                 # We have reached the end of the queue.
                 break
 
-            (problem, difficulty, instance, selector, seed, n_nodes, n_lps, solve_time, gap, status, wall_time,
-             proc_time) = result
+            (problem, selector, seed, instance, n_nodes, n_lps, solve_time, gap, status, wall_time, proc_time) = result
             writer.writerow(
-                {'problem': problem, 'difficulty': difficulty, 'instance': instance, 'selector': selector, 'seed': seed,
-                 'n_nodes': n_nodes, 'n_lps': n_lps, 'solve_time': solve_time, 'gap': gap, 'status': status,
-                 'wall_time': wall_time, 'process_time': proc_time})
+                {'problem': problem, 'selector': selector, 'seed': seed, 'instance': instance, 'n_nodes': n_nodes,
+                 'n_lps': n_lps, 'solve_time': solve_time, 'gap': gap, 'status': status, 'wall_time': wall_time,
+                 'process_time': proc_time})
     print("Done!")
     print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
     print(f"CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
 
 
 def process_tasks(task_queue: Queue, out_queue: Queue):
-    """Worker loop: fetch a task and evaluate the given model on the given evaluation instance.
+    """Worker loop: fetch a task and evaluate the given model on the given benchmark instance.
 
     :param task_queue: The task queue from which the worker needs to fetch tasks.
     :param out_queue: The out queue to which the worker should send results.
@@ -281,7 +274,7 @@ def process_tasks(task_queue: Queue, out_queue: Queue):
             # This worker is done.
             break
 
-        problem, difficulty, instance, path, selector, seed = task
+        problem, selector, seed, instance, path = task
 
         rng = np.random.default_rng(seed)
         tf.random.set_seed(rng.integers(np.iinfo(int).max))
@@ -331,9 +324,8 @@ def process_tasks(task_queue: Queue, out_queue: Queue):
         status = model.getStatus()
 
         # Send result to the out queue.
-        out_queue.put((
-            problem, difficulty, instance, selector, seed, n_nodes, n_lps, solve_time, gap, status, wall_time,
-            proc_time))
+        out_queue.put(
+            (problem, selector, seed, instance, n_nodes, n_lps, solve_time, gap, status, wall_time, proc_time))
         model.freeProb()
 
 
@@ -345,4 +337,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     print(f"Running {args.n_jobs} jobs in parallel.")
-    evaluate_models(args.n_jobs)
+    benchmark_models(args.n_jobs)

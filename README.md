@@ -1,6 +1,6 @@
-Graph convolutional neural network (GCNN) for cutting plane selection.
+# GCNN cut selector
 
-## About
+A graph convolutional neural network (GCNN) for cutting plane selection.
 
 ## Installation
 
@@ -8,6 +8,12 @@ Graph convolutional neural network (GCNN) for cutting plane selection.
   here: https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html (we used Anaconda).
 - Create a virtual environment with all required packages by running the following
   command: ```conda env create -f environment.yml```
+- For benchmarking, download the MIPLIB 2010 benchmark set from: http://miplib2010.zib.de/.
+    - Alternatively, one can download any other benchmarking set (e.g., MIPLIB 2017), as long as it contains instances
+      that
+      SCIP can read. For a list of file types, see: https://www.scipopt.org/doc/html/group__FILEREADERS.php.
+    - Save the instances under ```path_to_code/data/benchmarking```, where ```path_to_code``` denotes the path to the
+      project's directory.
 - You can open and edit the code in any editor, we used the PyCharm IDE: https://www.jetbrains.com/pycharm/.
 
 ## Usage
@@ -97,6 +103,22 @@ Optional argument:
 
 - --n_jobs: The number of jobs to run in parallel (default: all cores).
 
+#### Model benchmarking
+
+```
+python model_benchmarker.py
+```
+
+Optional argument:
+
+- --n_jobs: The number of jobs to run in parallel (default: all cores).
+
+#### Summarizing
+
+```
+python summarizer.py
+```
+
 ## File description
 
 - ```data_collector.py```
@@ -109,6 +131,9 @@ Optional argument:
     - Main execution environment.
 - ```model.py```
     - Module that provides the GCNN model functionality.
+- ```model_benchmarker.py```
+    - Module used for benchmarking the GCNN approach.
+    - Parallelized over multiple cores.
 - ```model_evaluator.py```
     - Module used for evaluating trained models.
     - Parallelized over multiple cores.
@@ -116,7 +141,9 @@ Optional argument:
     - Module used for testing trained models.
 - ```model_trainer.py```
     - Module used for training models.
+- ```summarizer.py```
+    - Module used to summarize all obtained results.
 - ```utils.py```
     - Module that provides some general utility methods.
 
-## Time
+## Timings
