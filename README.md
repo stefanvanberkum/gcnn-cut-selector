@@ -30,7 +30,9 @@ The ```main.py``` module can be used to run all the experiments, simply by speci
 configurations.
 
 _Note._ When using GPU for TensorFlow, if many memory errors occur during model training, consider reducing the batch
-size. If there are just a few, the algorithm will skip these batches that are too large.
+size. If there are just a few, the algorithm will skip these batches that are too large. Moreover, when training the
+models sequentially, it seems that GPU memory can get clogged, so restarting your computer and rerunning from the part
+that yields errors might help too.
 
 ### Command line
 
