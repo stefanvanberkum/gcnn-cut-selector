@@ -282,7 +282,7 @@ def process_tasks(task_queue: Queue, out_queue: Queue):
 
         # Initialize model.
         model = scip.Model()
-        init_scip(model, scip_seed, cpu_time=True)
+        init_scip(model, scip_seed, most_inf=False, presolve_restart=True, cpu_time=True)
         model.readProblem(path)
 
         if selector == 'hybrid':

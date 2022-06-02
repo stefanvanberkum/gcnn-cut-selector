@@ -252,12 +252,15 @@ def get_objcos(row: pyscipopt.scip.Row, row_norm: float, obj_norm: float):
     return dot / (row_norm * obj_norm)
 
 
-def init_scip(model: pyscipopt.scip.Model, seed: int, time_limit=3600, cpu_time=False):
+def init_scip(model: pyscipopt.scip.Model, seed: int, time_limit=3600, most_inf=True, presolve_restart=False,
+              cpu_time=False):
     """Initialize the SCIP model parameters.
 
     :param model: The SCIP model to be initialized.
     :param time_limit: The time limit for solving.
     :param seed: The desired seed value to be used for variable permutation and other random components of the solver.
+    :param most_inf: True if most infeasible branching should be used, otherwise the default SCIP rule will be used.
+    :param presolve_restart: True if presolving restarts are allowed.
     :param cpu_time: True if CPU time should be used for timing, otherwise wall clock time will be used.
     """
 
@@ -269,11 +272,13 @@ def init_scip(model: pyscipopt.scip.Model, seed: int, time_limit=3600, cpu_time=
     model.setIntParam('randomization/permutationseed', seed)
     model.setIntParam('randomization/randomseedshift', seed)
 
-    # Set branching rule to most infeasible branching.
-    model.setIntParam('branching/mostinf/priority', 5000000)
+    if most_inf:
+        # Set branching rule to most infeasible branching.
+        model.setIntParam('branching/mostinf/priority', 5000000)
 
-    # Disable presolver restarts.
-    model.setIntParam('presolving/maxrestarts', 0)
+    if not presolve_restart:
+        # Disable presolver restarts.
+        model.setIntParam('presolving/maxrestarts', 0)
 
     # Disable output.
     model.setIntParam('display/verblevel', 0)
