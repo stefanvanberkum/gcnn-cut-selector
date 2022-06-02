@@ -206,7 +206,7 @@ def benchmark_models(n_jobs: int):
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
     tf.config.set_visible_devices([], 'GPU')
 
-    # Schedule jobs (hard to easy in order to minimize the number of idle CPU cores).
+    # Schedule jobs.
     manager = Manager()
     task_queue = manager.Queue()
     for problem in problems:
