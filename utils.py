@@ -148,12 +148,15 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     if incumbent is not None:
         # Get the variable's value in the current primal solution.
         col_feats['primal_val'] = np.array([model.getSolVal(incumbent, col.getVar()) for col in cols]).reshape(-1, 1)
-
-        # Compute the variable's average value over all primal solutions.
-        col_feats['avg_primal'] = np.mean(
-            [[model.getSolVal(sol, col.getVar()) for sol in model.getSols()] for col in cols], axis=1).reshape(-1, 1)
     else:
         col_feats['primal_val'] = np.zeros(n_cols).reshape(-1, 1)
+
+    sols = model.getSols()
+    if len(sols) != 0:
+        # Compute the variable's average value over all primal solutions.
+        col_feats['avg_primal'] = np.mean([[model.getSolVal(sol, col.getVar()) for sol in sols] for col in cols],
+                                          axis=1).reshape(-1, 1)
+    else:
         col_feats['avg_primal'] = np.zeros(n_cols).reshape(-1, 1)
 
     col_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
