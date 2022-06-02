@@ -99,11 +99,11 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     write_log(f"fractions: {fractions}", logfile)
 
     rng = np.random.default_rng(seed)
-    tf.random.set_seed(rng.integers(np.iinfo(int).max))
+    tf.random.set_seed(int(rng.integers(np.iinfo(int).max)))
 
     # Retrieve training and validation samples.
-    train_files = glob.glob(f"data/samples/{problem_folder}/train/sample_*.pkl")
-    valid_files = glob.glob(f"data/samples/{problem_folder}/valid/sample_*.pkl")
+    train_files = sorted(glob.glob(f"data/samples/{problem_folder}/train/sample_*.pkl"))
+    valid_files = sorted(glob.glob(f"data/samples/{problem_folder}/valid/sample_*.pkl"))
 
     write_log(f"{len(train_files)} training samples", logfile)
     write_log(f"{len(valid_files)} validation samples", logfile)

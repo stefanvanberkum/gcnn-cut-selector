@@ -284,7 +284,7 @@ def process_tasks(task_queue: Queue, out_queue: Queue):
         problem, difficulty, instance, path, selector, seed = task
 
         rng = np.random.default_rng(seed)
-        tf.random.set_seed(rng.integers(np.iinfo(int).max))
+        tf.random.set_seed(int(rng.integers(np.iinfo(int).max)))
         scip_seed = rng.integers(2147483648)
 
         # Initialize model.

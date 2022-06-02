@@ -194,7 +194,7 @@ def benchmark_models(n_jobs: int):
     print("Benchmarking models...")
 
     # Load the (MIPLIB 2010) benchmark set.
-    instances = glob.glob(f"data/benchmarking/*.mps")
+    instances = sorted(glob.glob(f"data/benchmarking/*.mps"))
 
     os.makedirs('results', exist_ok=True)
 
@@ -277,7 +277,7 @@ def process_tasks(task_queue: Queue, out_queue: Queue):
         problem, selector, seed, instance, path = task
 
         rng = np.random.default_rng(seed)
-        tf.random.set_seed(rng.integers(np.iinfo(int).max))
+        tf.random.set_seed(int(rng.integers(np.iinfo(int).max)))
         scip_seed = rng.integers(2147483648)
 
         # Initialize model.

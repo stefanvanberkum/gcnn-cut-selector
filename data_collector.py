@@ -214,33 +214,33 @@ def collect_data(n_jobs: int):
     seeds = seed_generator.integers(2 ** 32, size=4)
 
     print("Collecting set covering instance data...")
-    train = glob.glob('data/instances/setcov/train_500r/*.lp')
-    valid = glob.glob('data/instances/setcov/valid_500r/*.lp')
-    test = glob.glob('data/instances/setcov/test_500r/*.lp')
+    train = sorted(glob.glob('data/instances/setcov/train_500r/*.lp'))
+    valid = sorted(glob.glob('data/instances/setcov/valid_500r/*.lp'))
+    test = sorted(glob.glob('data/instances/setcov/test_500r/*.lp'))
     out_dir = 'data/samples/setcov/500r'
     collect_problem(train, valid, test, out_dir, n_jobs, seeds[0])
     print("")
 
     print("Collecting combinatorial auction instance data...")
-    train = glob.glob('data/instances/combauc/train_100i_500b/*.lp')
-    valid = glob.glob('data/instances/combauc/valid_100i_500b/*.lp')
-    test = glob.glob('data/instances/combauc/test_100i_500b/*.lp')
+    train = sorted(glob.glob('data/instances/combauc/train_100i_500b/*.lp'))
+    valid = sorted(glob.glob('data/instances/combauc/valid_100i_500b/*.lp'))
+    test = sorted(glob.glob('data/instances/combauc/test_100i_500b/*.lp'))
     out_dir = 'data/samples/combauc/100i_500b'
     collect_problem(train, valid, test, out_dir, n_jobs, seeds[1])
     print("")
 
     print("Collecting capacitated facility instance data...")
-    train = glob.glob('data/instances/capfac/train_100c/*.lp')
-    valid = glob.glob('data/instances/capfac/valid_100c/*.lp')
-    test = glob.glob('data/instances/capfac/test_100c/*.lp')
+    train = sorted(glob.glob('data/instances/capfac/train_100c/*.lp'))
+    valid = sorted(glob.glob('data/instances/capfac/valid_100c/*.lp'))
+    test = sorted(glob.glob('data/instances/capfac/test_100c/*.lp'))
     out_dir = 'data/samples/capfac/100c'
     collect_problem(train, valid, test, out_dir, n_jobs, seeds[2])
     print("")
 
     print("Collecting maximum independent set instance data...")
-    train = glob.glob('data/instances/indset/train_500n/*.lp')
-    valid = glob.glob('data/instances/indset/valid_500n/*.lp')
-    test = glob.glob('data/instances/indset/test_500n/*.lp')
+    train = sorted(glob.glob('data/instances/indset/train_500n/*.lp'))
+    valid = sorted(glob.glob('data/instances/indset/valid_500n/*.lp'))
+    test = sorted(glob.glob('data/instances/indset/test_500n/*.lp'))
     out_dir = 'data/samples/indset/500n'
     collect_problem(train, valid, test, out_dir, n_jobs, seeds[3])
 
@@ -466,7 +466,7 @@ if __name__ == '__main__':
     module_seed = module_seeds[problem_indices[args.problem]]
 
     dimension = dims[args.problem]
-    filepaths = glob.glob(f"data/instances/{args.problem}/{args.set}_{dimension}/*.lp")
+    filepaths = sorted(glob.glob(f"data/instances/{args.problem}/{args.set}_{dimension}/*.lp"))
     output_dir = f"data/samples/{args.problem}/{dimension}/{args.set}"
 
     os.makedirs(output_dir, exist_ok=True)

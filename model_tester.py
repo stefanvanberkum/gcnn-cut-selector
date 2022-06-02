@@ -73,14 +73,14 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     result_file = f"results/test/{problem}/{seed}.csv"
 
     # Retrieve testing samples.
-    test_files = glob.glob(f"data/samples/{problem_folder}/test/sample_*.pkl")
+    test_files = sorted(glob.glob(f"data/samples/{problem_folder}/test/sample_*.pkl"))
 
     # Compile the model call as TensorFlow function for performance.
     model = GCNN()
     model.call = tf.function(model.call, input_signature=model.input_signature)
 
     rng = np.random.default_rng(seed)
-    tf.random.set_seed(rng.integers(np.iinfo(int).max))
+    tf.random.set_seed(int(rng.integers(np.iinfo(int).max)))
 
     # Load the trained model.
     model.restore_state(f"trained_models/{problem}/{seed}/best_params.pkl")
