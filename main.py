@@ -7,6 +7,7 @@ from time import perf_counter
 
 from data_collector import collect_data
 from instance_generator import generate_instances
+from model_benchmarker import benchmark_models
 from model_evaluator import evaluate_models
 from model_tester import test_models
 from model_trainer import train_models
@@ -29,6 +30,7 @@ def main():
     train = True
     test = True
     evaluate = False  # This needs to be run separately as TensorFlow cannot disable GPU mid-execution.
+    benchmark = False  # This needs to be run separately as TensorFlow cannot disable GPU mid-execution.
     summarize = False
     seed = 0
 
@@ -56,6 +58,10 @@ def main():
 
     if evaluate:
         evaluate_models(n_jobs)
+        print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
+
+    if benchmark:
+        benchmark_models(n_jobs)
         print(f"Elapsed time: {str(timedelta(seconds=ceil(perf_counter() - start_time)))}\n")
 
     if summarize:
