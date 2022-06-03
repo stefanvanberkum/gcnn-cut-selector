@@ -98,6 +98,9 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     write_log(f"early_stopping: {early_stopping}", logfile)
     write_log(f"fractions: {fractions}", logfile)
 
+    # Disable TensorFlow logs.
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
     rng = np.random.default_rng(seed)
     tf.random.set_seed(int(rng.integers(np.iinfo(int).max)))
 

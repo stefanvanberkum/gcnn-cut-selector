@@ -75,6 +75,9 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     # Retrieve testing samples.
     test_files = sorted(glob.glob(f"data/samples/{problem_folder}/test/sample_*.pkl"))
 
+    # Disable TensorFlow logs.
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
     # Compile the model call as TensorFlow function for performance.
     model = GCNN()
     model.call = tf.function(model.call, input_signature=model.input_signature)
