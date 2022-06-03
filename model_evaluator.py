@@ -191,11 +191,12 @@ def evaluate_models(n_jobs: int):
 
     print("Evaluating models...")
 
-    setcov_folders = {'easy': 'setcov/eval_500r', 'medium': 'setcov/eval_1000r', 'hard': 'setcov/eval_2000r'}
-    combauc_folders = {'easy': 'combauc/eval_100i_500b', 'medium': 'combauc/eval_200i_1000b',
-                       'hard': 'combauc/eval_300i_1500b'}
-    capfac_folders = {'easy': 'capfac/eval_100c', 'medium': 'capfac/eval_200c', 'hard': 'capfac/eval_400c'}
-    indset_folders = {'easy': 'indset/eval_500n', 'medium': 'indset/eval_1000n', 'hard': 'indset/eval_1500n'}
+    setcov_folders = {'easy': 'setcov/eval_500r', 'medium': 'setcov/eval_700r', 'hard': 'setcov/eval_900r'}
+    combauc_folders = {'easy': 'combauc/eval_100i_500b', 'medium': 'combauc/eval_150i_750b',
+                       'hard': 'combauc/eval_200i_1000b'}
+    capfac_folders = {'easy': 'capfac/eval_100c_100f', 'medium': 'capfac/eval_150c_150f',
+                      'hard': 'capfac/eval_200c_200f'}
+    indset_folders = {'easy': 'indset/eval_500n', 'medium': 'indset/eval_800n', 'hard': 'indset/eval_1100n'}
     folders = {'setcov': setcov_folders, 'combauc': combauc_folders, 'capfac': capfac_folders, 'indset': indset_folders}
 
     os.makedirs('results', exist_ok=True)

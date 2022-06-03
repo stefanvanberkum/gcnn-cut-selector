@@ -76,7 +76,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
 
     fractions = np.array([0.25, 0.5, 0.75, 1])
 
-    problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c',
+    problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c_100f',
                        'indset': 'indset/500n'}
     problem_folder = problem_folders[problem]
 

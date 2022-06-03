@@ -230,10 +230,10 @@ def collect_data(n_jobs: int):
     print("")
 
     print("Collecting capacitated facility instance data...")
-    train = sorted(glob.glob('data/instances/capfac/train_100c/*.lp'))
-    valid = sorted(glob.glob('data/instances/capfac/valid_100c/*.lp'))
-    test = sorted(glob.glob('data/instances/capfac/test_100c/*.lp'))
-    out_dir = 'data/samples/capfac/100c'
+    train = sorted(glob.glob('data/instances/capfac/train_100c_100f/*.lp'))
+    valid = sorted(glob.glob('data/instances/capfac/valid_100c_100f/*.lp'))
+    test = sorted(glob.glob('data/instances/capfac/test_100c_100f/*.lp'))
+    out_dir = 'data/samples/capfac/100c_100f'
     collect_problem(train, valid, test, out_dir, n_jobs, seeds[2])
     print("")
 
@@ -457,7 +457,7 @@ if __name__ == '__main__':
     sample_count = {'train': 100000, 'valid': 20000, 'test': 20000}
     problem_indices = {'setcov': 0, 'combauc': 1, 'capfac': 2, 'indset': 3}
     set_indices = {'train': 0, 'valid': 1, 'test': 2}
-    dims = {'setcov': '500r', 'combauc': '100i_500b', 'capfac': '100c', 'indset': '500n'}
+    dims = {'setcov': '500r', 'combauc': '100i_500b', 'capfac': '100c_100f', 'indset': '500n'}
 
     # Generate all seeds for this module and get the one that corresponds to the specified problem.
     program_seed = load_seeds(name='program_seeds')[1]

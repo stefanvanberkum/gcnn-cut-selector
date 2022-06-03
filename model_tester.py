@@ -65,7 +65,7 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
 
     fractions = np.array([0.25, 0.5, 0.75, 1])
 
-    problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c',
+    problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c_100f',
                        'indset': 'indset/500n'}
     problem_folder = problem_folders[problem]
 

@@ -38,7 +38,7 @@ def summarize_sampling(out_dir: str):
     :param out_dir: The directory to store the summary in.
     """
 
-    dims = {'setcov': '50r', 'combauc': '10i_50b', 'capfac': '10c', 'indset': '50n'}
+    dims = {'setcov': '500r', 'combauc': '100i_500b', 'capfac': '100c_100f', 'indset': '500n'}
 
     # Collect all sample statistic files.
     train_stats = {}

@@ -174,26 +174,26 @@ def generate_instances(n_jobs: int):
     - Set covering:
 
         - Training, validation, testing, and easy evaluation: 500 rows, 1000 columns.
-        - Medium evaluation: 1000 rows, 1000 columns.
-        - Hard evaluation: 2000 rows, 1000 columns.
+        - Medium evaluation: 700 rows, 1000 columns.
+        - Hard evaluation: 900 rows, 1000 columns.
 
     - Combinatorial auction:
 
         - Training, validation, testing, and easy evaluation: 100 items, 500 bids.
-        - Medium evaluation: 200 items, 1000 bids.
-        - Hard evaluation: 300 items, 1500 bids.
+        - Medium evaluation: 150 items, 750 bids.
+        - Hard evaluation: 200 items, 1000 bids.
 
     - Capacitated facility:
 
         - Training, validation, testing, and easy evaluation: 100 customers, 100 facilities.
-        - Medium evaluation: 200 customers, 100 facilities.
-        - Hard evaluation: 400 customers, 100 facilities.
+        - Medium evaluation: 150 customers, 150 facilities.
+        - Hard evaluation: 200 customers, 200 facilities.
 
     - Maximum independent set:
 
         - Training, validation, testing, and easy evaluation: 500 nodes.
-        - Medium evaluation: 1000 nodes.
-        - Hard evaluation: 1500 nodes.
+        - Medium evaluation: 800 nodes.
+        - Hard evaluation: 1100 nodes.
 
     The instance generation is parallelized over multiple cores. Tasks are first sent to a queue, and then processed
     by the workers.
@@ -244,11 +244,12 @@ def generate_instances(n_jobs: int):
 def make_dirs():
     """Create all directories."""
 
-    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 2000}
-    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 200, 'hard': 300}
-    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 1500}
-    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 200, 'hard': 400}
-    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 1500}
+    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 700, 'hard': 900}
+    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
+    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 750, 'hard': 1000}
+    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
+    n_facilities = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
+    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 800, 'hard': 1100}
 
     for dataset in n_rows.keys():
         if dataset == 'easy' or dataset == 'medium' or dataset == 'hard':
@@ -263,8 +264,9 @@ def make_dirs():
         bids = n_bids[dataset]
         os.makedirs(f'data/instances/combauc/{name}_{items}i_{bids}b')
 
+        facilities = n_facilities[dataset]
         customers = n_customers[dataset]
-        os.makedirs(f'data/instances/capfac/{name}_{customers}c')
+        os.makedirs(f'data/instances/capfac/{name}_{customers}c_{facilities}f')
 
         nodes = n_nodes[dataset]
         os.makedirs(f'data/instances/indset/{name}_{nodes}n')
@@ -276,11 +278,12 @@ def process_tasks(task_queue: Queue):
     :param task_queue: The task queue from which the worker needs to fetch tasks.
     """
 
-    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 2000}
-    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 200, 'hard': 300}
-    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 1500}
-    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 200, 'hard': 400}
-    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 1000, 'hard': 1500}
+    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 700, 'hard': 900}
+    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
+    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 750, 'hard': 1000}
+    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
+    n_facilities = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
+    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 800, 'hard': 1100}
 
     while True:
         # Fetch a task.
@@ -307,8 +310,9 @@ def process_tasks(task_queue: Queue):
             filepath = f'data/instances/combauc/{name}_{n_items[dataset]}i_{n_bids[dataset]}b/instance_{number}.lp'
             generate_combauc(n_items[dataset], n_bids[dataset], filepath, rng)
         elif task['problem'] == 'capfac':
-            filepath = f'data/instances/capfac/{name}_{n_customers[dataset]}c/instance_{number}.lp'
-            generate_capfac(n_customers[dataset], filepath, rng)
+            filepath = f'data/instances/capfac/{name}_{n_customers[dataset]}c_{n_facilities[dataset]}f/instance_' \
+                       f'{number}.lp'
+            generate_capfac(n_customers[dataset], n_facilities[dataset], filepath, rng)
         elif task['problem'] == 'indset':
             filepath = f'data/instances/indset/{name}_{n_nodes[dataset]}n/instance_{number}.lp'
             graph = Graph.barabasi_albert(n_nodes[dataset], rng)
@@ -571,7 +575,7 @@ def generate_combauc(n_items: int, n_bids: int, filepath: str, rng: np.random.Ge
             file.write(f" x{i + 1}")
 
 
-def generate_capfac(n_customers: int, filepath: str, rng: np.random.Generator, n_facilities=100, ratio=5):
+def generate_capfac(n_customers: int, n_facilities: int, filepath: str, rng: np.random.Generator, ratio=5):
     """Generate a capacitated facility location problem instance and writes it to a CPLEX LP file.
 
     This method randomly generates costs, capacities, demands, based on the algorithm described in [1]_. For this
@@ -588,9 +592,9 @@ def generate_capfac(n_customers: int, filepath: str, rng: np.random.Generator, n
         https://doi.org/10.1016/0377-2217(91)90261-S
 
     :param n_customers: The desired number of customers.
+    :param n_facilities: The desired number of facilities.
     :param filepath: The desired save file path.
     :param rng: A random number generator.
-    :param n_facilities: The desired number of facilities.
     :param ratio: The desired capacity to demand ratio.
     """
 
