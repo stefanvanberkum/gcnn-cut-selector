@@ -216,8 +216,8 @@ def summarize_evaluation(out_dir: str):
                     node_diffs[i] = 100 * np.round(np.std(node_counts)) / node_means[i]
 
                 # Compute the number of wins for each selector.
-                baseline_wins = solve_times[:, 0] <= solve_times[:, 1]
-                gcnn_wins = 1 - baseline_wins
+                baseline_wins = np.logical_and(solve_times[:, 0] < solve_times[:, 1], solve_times[:, 0] < 3600)
+                gcnn_wins = np.logical_and(solve_times[:, 1] < solve_times[:, 0], solve_times[:, 1] < 3600)
                 baseline_wins = np.sum(baseline_wins)
                 gcnn_wins = np.sum(gcnn_wins)
                 lines[0] += [f"{time_means[0]:.2f} $\\pm$ {time_diffs[0]:.1f}%", f"{baseline_wins}",
@@ -332,8 +332,8 @@ def summarize_benchmarking(out_dir: str):
                 node_diffs[i] = 100 * np.round(np.std(node_counts)) / node_means[i]
 
             # Compute the number of wins for each selector.
-            baseline_wins = solve_times[:, 0] <= solve_times[:, 1]
-            gcnn_wins = 1 - baseline_wins
+            baseline_wins = np.logical_and(solve_times[:, 0] < solve_times[:, 1], solve_times[:, 0] < 3600)
+            gcnn_wins = np.logical_and(solve_times[:, 1] < solve_times[:, 0], solve_times[:, 1] < 3600)
             baseline_wins = np.sum(baseline_wins)
             gcnn_wins = np.sum(gcnn_wins)
             print("hybrid", f"{time_means[0]:.2f} $\\pm$ {time_diffs[0]:.1f}%", f"{baseline_wins}",
