@@ -192,12 +192,20 @@ def summarize_evaluation(out_dir: str):
                 time_means = np.zeros(len(selectors))
                 time_diffs = np.zeros(len(selectors))
                 solve_times = np.zeros((len(split[problem][difficulty]['hybrid']['string']), len(selectors)))
-                node_means = np.zeros(len(selectors), dtype=int)
-                node_diffs = np.zeros(len(selectors))
+                solved = [set(), set()]
                 for i in range(len(selectors)):
                     selector = selectors[i]
                     int_data = split[problem][difficulty][selector]['int']
                     float_data = split[problem][difficulty][selector]['float']
+                    string_data = split[problem][difficulty][selector]['string']
+
+                    # Record which instances were solved.
+                    for j in range(len(int_data)):
+                        instance = int_data[j, 0]
+                        seed = int_data[j, 1]
+
+                        if string_data[j, 3] == 'optimal':
+                            solved[i].add((instance, seed))
 
                     # Compute 1-shifted geometric mean of solving time.
                     solve_time = float_data[:, 0]
@@ -210,16 +218,31 @@ def summarize_evaluation(out_dir: str):
                     sorted_float = float_data[np.lexsort((int_data[:, 1], int_data[:, 0]))]
                     solve_times[:, i] = sorted_float[:, 0]
 
-                    # Compute the mean number of nodes.
-                    node_counts = int_data[:, 2]
-                    node_means[i] = np.round(np.mean(node_counts)).astype(int)
-                    node_diffs[i] = 100 * np.round(np.std(node_counts)) / node_means[i]
-
                 # Compute the number of wins for each selector.
                 baseline_wins = np.logical_and(solve_times[:, 0] < solve_times[:, 1], solve_times[:, 0] < 3600)
                 gcnn_wins = np.logical_and(solve_times[:, 1] < solve_times[:, 0], solve_times[:, 1] < 3600)
                 baseline_wins = np.sum(baseline_wins)
                 gcnn_wins = np.sum(gcnn_wins)
+
+                # Compute the mean number of nodes for each selector, considering only instances solved by both.
+                solved_by_both = solved[0].intersection(solved[1])
+                node_means = np.zeros(len(selectors), dtype=int)
+                node_diffs = np.zeros(len(selectors))
+                if len(solved_by_both) != 0:
+                    for i in range(len(selectors)):
+                        selector = selectors[i]
+                        int_data = split[problem][difficulty][selector]['int']
+
+                        node_counts = []
+                        for j in range(len(int_data)):
+                            instance = int_data[j, 0]
+                            seed = int_data[j, 1]
+
+                            if (instance, seed) in solved_by_both:
+                                node_counts.append(int_data[j, 2])
+                        node_means[i] = np.round(np.mean(node_counts)).astype(int)
+                        node_diffs[i] = 100 * np.std(node_counts) / node_means[i]
+
                 lines[0] += [f"{time_means[0]:.2f} $\\pm$ {time_diffs[0]:.1f}%", f"{baseline_wins}",
                              f"{node_means[0]:d} $\\pm$ {node_diffs[0]:.1f}%", ""]
                 lines[1] += [f"{time_means[1]:.2f} $\\pm$ {time_diffs[1]:.1f}%", f"{gcnn_wins}",
@@ -308,12 +331,20 @@ def summarize_benchmarking(out_dir: str):
             time_means = np.zeros(len(selectors))
             time_diffs = np.zeros(len(selectors))
             solve_times = np.zeros((len(split[problem]['hybrid']['string']), len(selectors)))
-            node_means = np.zeros(len(selectors), dtype=int)
-            node_diffs = np.zeros(len(selectors))
+            solved = [set(), set()]
             for i in range(len(selectors)):
                 selector = selectors[i]
                 int_data = split[problem][selector]['int']
                 float_data = split[problem][selector]['float']
+                string_data = split[problem][selector]['string']
+
+                # Record which instances were solved.
+                for j in range(len(int_data)):
+                    instance = string_data[j, 2]
+                    seed = int_data[j, 0]
+
+                    if string_data[j, 3] == 'optimal':
+                        solved[i].add((instance, seed))
 
                 # Compute 1-shifted geometric mean of solving time.
                 solve_time = float_data[:, 0]
@@ -326,16 +357,32 @@ def summarize_benchmarking(out_dir: str):
                 sorted_float = float_data[np.lexsort((int_data[:, 1], int_data[:, 0]))]
                 solve_times[:, i] = sorted_float[:, 0]
 
-                # Compute the mean number of nodes.
-                node_counts = int_data[:, 2]
-                node_means[i] = np.round(np.mean(node_counts)).astype(int)
-                node_diffs[i] = 100 * np.round(np.std(node_counts)) / node_means[i]
-
             # Compute the number of wins for each selector.
             baseline_wins = np.logical_and(solve_times[:, 0] < solve_times[:, 1], solve_times[:, 0] < 3600)
             gcnn_wins = np.logical_and(solve_times[:, 1] < solve_times[:, 0], solve_times[:, 1] < 3600)
             baseline_wins = np.sum(baseline_wins)
             gcnn_wins = np.sum(gcnn_wins)
+
+            # Compute the mean number of nodes for each selector, considering only instances solved by both.
+            solved_by_both = solved[0].intersection(solved[1])
+            node_means = np.zeros(len(selectors), dtype=int)
+            node_diffs = np.zeros(len(selectors))
+            if len(solved_by_both) != 0:
+                for i in range(len(selectors)):
+                    selector = selectors[i]
+                    int_data = split[problem][selector]['int']
+                    string_data = split[problem][selector]['string']
+
+                    node_counts = []
+                    for j in range(len(int_data)):
+                        instance = string_data[j, 2]
+                        seed = int_data[j, 0]
+
+                        if (instance, seed) in solved_by_both:
+                            node_counts.append(int_data[j, 1])
+                    node_means[i] = np.round(np.mean(node_counts)).astype(int)
+                    node_diffs[i] = 100 * np.std(node_counts) / node_means[i]
+
             print("hybrid", f"{time_means[0]:.2f} $\\pm$ {time_diffs[0]:.1f}%", f"{baseline_wins}",
                   f"{node_means[0]:d} $\\pm$ {node_diffs[0]:.1f}%", sep=',', file=file)
             print("gcnn", f"{time_means[1]:.2f} $\\pm$ {time_diffs[1]:.1f}%", f"{gcnn_wins}",
