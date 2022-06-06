@@ -3,7 +3,7 @@
 Summary
 =======
 This module provides methods for summarizing the sample statistics and model testing, evaluation, and benchmarking
-results.
+results. It's probably unnecessarily complicated, but it works.
 
 Functions
 =========
@@ -190,40 +190,64 @@ def summarize_evaluation(out_dir: str):
 
             lines = [[], []]
             for difficulty in difficulties:
-                time_means = np.zeros(len(selectors))
-                time_diffs = np.zeros(len(selectors))
-                solve_times = np.zeros((len(split[problem][difficulty]['hybrid']['string']), len(selectors)))
+                # Record which instances were considered and solved by both.
+                considered = [set(), set()]
                 solved = [set(), set()]
                 for i in range(len(selectors)):
                     selector = selectors[i]
                     int_data = split[problem][difficulty][selector]['int']
-                    float_data = split[problem][difficulty][selector]['float']
                     string_data = split[problem][difficulty][selector]['string']
 
-                    # Record which instances were solved.
                     for j in range(len(int_data)):
                         instance = int_data[j, 0]
                         seed = int_data[j, 1]
 
+                        considered[i].add((instance, seed))
                         if string_data[j, 3] == 'optimal':
                             solved[i].add((instance, seed))
 
-                    # Compute 1-shifted geometric mean of solving time.
-                    solve_time = float_data[:, 0]
-                    k = len(solve_time)
-                    s = 1
-                    time_means[i] = np.power(np.prod(np.maximum(solve_time + s, 1)), 1 / k) - s
-                    time_diffs[i] = 100 * np.sqrt(np.mean(np.power(solve_time - time_means[i], 2))) / time_means[i]
+                # Compute the mean solve time and number of wins, considering only instances considered by both.
+                considered_by_both = considered[0].intersection(considered[1])
+                time_means = np.zeros(len(selectors))
+                time_diffs = np.zeros(len(selectors))
+                solve_times = []
+                baseline_wins = 0
+                gcnn_wins = 0
+                if len(considered_by_both) != 0:
+                    for i in range(len(selectors)):
+                        selector = selectors[i]
+                        int_data = split[problem][difficulty][selector]['int']
+                        float_data = split[problem][difficulty][selector]['float']
 
-                    # Record solve times sorted by instance and seed (in that order).
-                    sorted_float = float_data[np.lexsort((int_data[:, 1], int_data[:, 0]))]
-                    solve_times[:, i] = sorted_float[:, 0]
+                        instances = []
+                        seeds = []
+                        solve_time = []
+                        for j in range(len(int_data)):
+                            instance = int_data[j, 0]
+                            seed = int_data[j, 1]
 
-                # Compute the number of wins for each selector.
-                baseline_wins = np.logical_and(solve_times[:, 0] < solve_times[:, 1], solve_times[:, 0] < 3600)
-                gcnn_wins = np.logical_and(solve_times[:, 1] < solve_times[:, 0], solve_times[:, 1] < 3600)
-                baseline_wins = np.sum(baseline_wins)
-                gcnn_wins = np.sum(gcnn_wins)
+                            if (instance, seed) in considered_by_both:
+                                instances.append(int_data[j, 0])
+                                seeds.append(int_data[j, 1])
+                                solve_time.append(float_data[j, 0])
+
+                        # Compute 1-shifted geometric mean of solving time.
+                        solve_time = np.array(solve_time)
+                        k = len(solve_time)
+                        s = 1
+                        time_means[i] = np.exp(np.sum(np.log(np.maximum(solve_time + s, 1))) / k) - s
+                        time_diffs[i] = 100 * np.sqrt(np.mean(np.power(solve_time - time_means[i], 2))) / time_means[i]
+
+                        # Record solve times sorted by instance and seed (in that order).
+                        sorted_solve = solve_time[np.lexsort((seeds, instances))]
+                        solve_times.append(sorted_solve)
+
+                    # Compute the number of wins for each selector.
+                    solve_times = np.array(solve_times)
+                    baseline_wins = np.logical_and(solve_times[0, :] < solve_times[1, :], solve_times[0, :] < 3600)
+                    gcnn_wins = np.logical_and(solve_times[1, :] < solve_times[0, :], solve_times[1, :] < 3600)
+                    baseline_wins = np.sum(baseline_wins)
+                    gcnn_wins = np.sum(gcnn_wins)
 
                 # Compute the mean number of nodes for each selector, considering only instances solved by both.
                 solved_by_both = solved[0].intersection(solved[1])
@@ -329,14 +353,11 @@ def summarize_benchmarking(out_dir: str):
             headers = ["Time", "Wins", "Nodes"]
             print(problem, *headers, sep=',', file=file)
 
-            time_means = np.zeros(len(selectors))
-            time_diffs = np.zeros(len(selectors))
-            solve_times = np.zeros((len(split[problem]['hybrid']['string']), len(selectors)))
+            considered = [set(), set()]
             solved = [set(), set()]
             for i in range(len(selectors)):
                 selector = selectors[i]
                 int_data = split[problem][selector]['int']
-                float_data = split[problem][selector]['float']
                 string_data = split[problem][selector]['string']
 
                 # Record which instances were solved.
@@ -344,25 +365,53 @@ def summarize_benchmarking(out_dir: str):
                     instance = string_data[j, 2]
                     seed = int_data[j, 0]
 
+                    considered[i].add((instance, seed))
                     if string_data[j, 3] == 'optimal':
                         solved[i].add((instance, seed))
 
-                # Compute 1-shifted geometric mean of solving time.
-                solve_time = float_data[:, 0]
-                k = len(solve_time)
-                s = 1
-                time_means[i] = np.power(np.prod(np.maximum(solve_time + s, 1)), 1 / k) - s
-                time_diffs[i] = 100 * np.sqrt(np.mean(np.power(solve_time - time_means[i], 2))) / time_means[i]
+            # Compute the mean solve time and number of wins, considering only instances considered by both.
+            considered_by_both = considered[0].intersection(considered[1])
+            time_means = np.zeros(len(selectors))
+            time_diffs = np.zeros(len(selectors))
+            solve_times = []
+            baseline_wins = 0
+            gcnn_wins = 0
+            if len(considered_by_both) != 0:
+                for i in range(len(selectors)):
+                    selector = selectors[i]
+                    int_data = split[problem][selector]['int']
+                    float_data = split[problem][selector]['float']
+                    string_data = split[problem][selector]['string']
 
-                # Record solve times sorted by instance and seed (in that order).
-                sorted_float = float_data[np.lexsort((int_data[:, 1], int_data[:, 0]))]
-                solve_times[:, i] = sorted_float[:, 0]
+                    instances = []
+                    seeds = []
+                    solve_time = []
+                    for j in range(len(int_data)):
+                        instance = string_data[j, 2]
+                        seed = int_data[j, 0]
 
-            # Compute the number of wins for each selector.
-            baseline_wins = np.logical_and(solve_times[:, 0] < solve_times[:, 1], solve_times[:, 0] < 3600)
-            gcnn_wins = np.logical_and(solve_times[:, 1] < solve_times[:, 0], solve_times[:, 1] < 3600)
-            baseline_wins = np.sum(baseline_wins)
-            gcnn_wins = np.sum(gcnn_wins)
+                        if (instance, seed) in considered_by_both:
+                            instances.append(string_data[j, 2])
+                            seeds.append(int_data[j, 0])
+                            solve_time.append(float_data[j, 0])
+
+                    # Compute 1-shifted geometric mean of solving time.
+                    solve_time = np.array(solve_time)
+                    k = len(solve_time)
+                    s = 1
+                    time_means[i] = np.exp(np.sum(np.log(np.maximum(solve_time + s, 1))) / k) - s
+                    time_diffs[i] = 100 * np.sqrt(np.mean(np.power(solve_time - time_means[i], 2))) / time_means[i]
+
+                    # Record solve times sorted by instance and seed (in that order).
+                    sorted_solve = solve_time[np.lexsort((seeds, instances))]
+                    solve_times.append(sorted_solve)
+
+                # Compute the number of wins for each selector.
+                solve_times = np.array(solve_times)
+                baseline_wins = np.logical_and(solve_times[0, :] < solve_times[1, :], solve_times[0, :] < 3600)
+                gcnn_wins = np.logical_and(solve_times[1, :] < solve_times[0, :], solve_times[1, :] < 3600)
+                baseline_wins = np.sum(baseline_wins)
+                gcnn_wins = np.sum(gcnn_wins)
 
             # Compute the mean number of nodes for each selector, considering only instances solved by both.
             solved_by_both = solved[0].intersection(solved[1])
