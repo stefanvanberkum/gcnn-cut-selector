@@ -30,6 +30,7 @@ def summarize_stats():
     summarize_sampling(out_dir)
     summarize_testing(out_dir)
     summarize_evaluation(out_dir)
+    summarize_benchmarking(out_dir)
 
 
 def summarize_sampling(out_dir: str):
