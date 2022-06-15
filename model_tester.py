@@ -71,6 +71,7 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
 
     os.makedirs(f"results/test/{problem}", exist_ok=True)
     result_file = f"results/test/{problem}/{seed}.csv"
+    loss_file = f"results/test/{problem}/{seed}_loss"
 
     # Retrieve testing samples.
     test_files = sorted(glob.glob(f"data/samples/{problem_folder}/test/sample_*.pkl"))
@@ -95,7 +96,7 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     test_data = test_data.prefetch(2)
 
     # Test the model.
-    test_acc = process(model, test_data, fractions)
+    test_loss, test_acc = process(model, test_data, fractions)
 
     # Test the hybrid baseline cut selector.
     baseline_acc = np.zeros(len(fractions))
@@ -114,14 +115,10 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
             cut_feat_names = sample_cut['features']
             int_support = cut_feats[:, cut_feat_names.index('int_support')]
             efficacy = cut_feats[:, cut_feat_names.index('efficacy')]
-            cutoff = cut_feats[:, cut_feat_names.index('cutoff')]
             parallelism = cut_feats[:, cut_feat_names.index('parallelism')]
 
             # Compute cut quality scores.
-            if np.any(cutoff):
-                pred = efficacy + 0.1 * int_support + 0.1 * parallelism + 0.5 * cutoff
-            else:
-                pred = 1.5 * efficacy + 0.1 * int_support + 0.1 * parallelism
+            pred = efficacy + 0.1 * int_support + 0.1 * parallelism
 
             # Sort the cut indices based on the predicted and true bound improvements.
             true = sample_improvements
@@ -150,6 +147,9 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
         writer.writerow(
             {'type': 'baseline', 'seed': seed, **{f'{100 * k:.0f}%': baseline_acc[i] for i, k in enumerate(fractions)}})
 
+    # Record loss.
+    np.save(loss_file, np.array(test_loss))
+
     print("Done!")
     print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
     print("")
@@ -161,12 +161,14 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
     :param model: The trained model.
     :param dataloader: The input dataset to process.
     :param fractions: A list of fractions to compute the accuracy over (top x% correct).
-    :return: The mean accuracy over the input data.
+    :return: The loss and mean accuracies over the input data.
     """
 
+    loss = 0
     mean_acc = np.zeros(len(fractions))
 
     n_samples = 0
+    n_cuts = 0
     for batch in dataloader:
         (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
          n_vars, n_cuts, improvements) = batch
@@ -180,6 +182,7 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
 
         try:
             predictions = model(batched_states, tf.convert_to_tensor(False))
+            loss += n_cuts_total.numpy() * tf.keras.metrics.mean_squared_error(improvements, predictions).numpy()
 
             # Measure how often the model ranks the highest-quality cuts correctly.
             predictions = tf.split(value=predictions, num_or_size_splits=n_cuts)
@@ -208,14 +211,16 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
 
             mean_acc += acc
             n_samples += batch_size
+            n_cuts += n_cuts_total.numpy()
         except tf.errors.ResourceExhaustedError:
             # Skip batch if it's too large.
             print("WARNING: batch skipped.")
             pass
 
+    loss /= n_cuts
     mean_acc /= n_samples
 
-    return mean_acc
+    return loss, mean_acc
 
 
 if __name__ == '__main__':

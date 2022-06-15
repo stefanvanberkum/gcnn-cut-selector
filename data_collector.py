@@ -143,13 +143,8 @@ class SamplingAgent(Cutsel):
 
         if not query_expert or not uneventful:
             # Fall back to a hybrid cut selection rule.
-            if self.model.getBestSol() is not None:
-                quality = np.array([self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
-                    cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(
-                    cut) + 0.5 * self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in cuts])
-            else:
-                quality = np.array([1.5 * self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
-                    cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(cut) for cut in cuts])
+            quality = np.array([self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
+                cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(cut) for cut in cuts])
 
         # Rank the cuts in descending order of quality.
         rankings = sorted(range(len(cuts)), key=lambda x: quality[x], reverse=True)
@@ -181,8 +176,8 @@ class SamplingAgent(Cutsel):
         while i < n_selected - 1:
             # Mark all cuts that are parallel to higher-quality cut i.
             parallelism = [self.model.getRowParallelism(sorted_cuts[i], sorted_cuts[j]) for j in
-                           range(i + 1, len(sorted_cuts))]
-            parallelism = np.pad(parallelism, (i + 1, 0), constant_values=0)
+                           range(i + 1, n_selected)]
+            parallelism = np.pad(parallelism, (i + 1, len(cuts) - n_selected), constant_values=0)
             marked = (parallelism > self.p_max)
 
             # Only remove low-quality or very parallel cuts.

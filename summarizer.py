@@ -3,7 +3,7 @@
 Summary
 =======
 This module provides methods for summarizing the sample statistics and model testing, evaluation, and benchmarking
-results. It's probably unnecessarily complicated, but it works.
+results. It's probably unnecessarily complicated, but it deos the job.
 
 Functions
 =========

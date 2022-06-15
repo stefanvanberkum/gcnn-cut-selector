@@ -144,19 +144,18 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     # Get the variable's value in the current LP solution.
     col_feats['lp_val'] = np.array([col.getVar().getLPSol() for col in cols]).reshape(-1, 1)
 
-    incumbent = model.getBestSol()
-    if incumbent is not None:
-        # Get the variable's value in the current primal solution.
-        col_feats['primal_val'] = np.array([model.getSolVal(incumbent, col.getVar()) for col in cols]).reshape(-1, 1)
-    else:
-        col_feats['primal_val'] = np.zeros(n_cols).reshape(-1, 1)
-
     sols = model.getSols()
     if len(sols) != 0:
+        incumbent = model.getBestSol()
+
+        # Get the variable's value in the current primal solution.
+        col_feats['primal_val'] = np.array([model.getSolVal(incumbent, col.getVar()) for col in cols]).reshape(-1, 1)
+
         # Compute the variable's average value over all primal solutions.
         col_feats['avg_primal'] = np.mean([[model.getSolVal(sol, col.getVar()) for sol in sols] for col in cols],
                                           axis=1).reshape(-1, 1)
     else:
+        col_feats['primal_val'] = np.zeros(n_cols).reshape(-1, 1)
         col_feats['avg_primal'] = np.zeros(n_cols).reshape(-1, 1)
 
     col_feat_names = [[k, ] if v.shape[1] == 1 else [f'{k}_{i}' for i in range(v.shape[1])] for k, v in
@@ -197,7 +196,9 @@ def get_state(model: pyscipopt.scip.Model, cuts: list[pyscipopt.scip.Row]):
     efficacy = np.array([model.getCutEfficacy(cut) for cut in cuts])
     cut_feats['efficacy'] = np.concatenate((efficacy[has_lhs], efficacy[has_rhs])).reshape(-1, 1)
 
-    if incumbent is not None:
+    if len(sols) != 0:
+        incumbent = model.getBestSol()
+
         # Compute each cut's directed cutoff distance.
         cutoff = np.array([model.getCutLPSolCutoffDistance(cut, incumbent) for cut in cuts])
         cut_feats['cutoff'] = np.concatenate((cutoff[has_lhs], cutoff[has_rhs])).reshape(-1, 1)

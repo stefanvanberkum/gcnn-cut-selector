@@ -42,7 +42,7 @@ def train_models():
     seeds = generate_seeds(n_seeds=5, name='train_seeds', seed=seed)
 
     print("Training models...")
-    problems = ['setcov', 'combauc', 'capfac', 'indset']
+    problems = ['capfac', 'setcov', 'combauc', 'indset']  # Tune your batch size to accommodate capfac training.
     for problem in problems:
         for i in range(5):
             print(f"Training a model for {problem} problems, iteration {i + 1}...")
@@ -183,6 +183,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     write_log(f"BEST VALID LOSS: {valid_loss:.3e} " + "".join(
         [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
     write_log(f"Training time: {perf_counter() - wall_start} seconds", logfile)
+    tf.keras.clear_session()
 
     print("Done!")
     print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
@@ -249,6 +250,7 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, loss_
     mean_acc = np.zeros(len(fractions))
 
     n_samples = 0
+    n_cuts = 0
     for batch in dataloader:
         (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
          n_vars, n_cuts, improvements) = batch
@@ -298,15 +300,16 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array, loss_
                 frac = deviation / len(pred)
                 acc += (frac >= fractions)
 
-            mean_loss += loss.numpy() * batch_size
+            mean_loss += loss.numpy() * n_cuts_total.numpy()
             mean_acc += acc
             n_samples += batch_size
+            n_cuts += n_cuts_total.numpy()
         except tf.errors.ResourceExhaustedError:
             # Skip batch if it's too large.
             print("WARNING: batch skipped.")
             pass
 
-    mean_loss /= n_samples
+    mean_loss /= n_cuts
     mean_acc /= n_samples
 
     return mean_loss, mean_acc

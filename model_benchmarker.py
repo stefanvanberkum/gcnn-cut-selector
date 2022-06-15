@@ -105,13 +105,8 @@ class CustomCutsel(Cutsel):
             quality = self.get_improvements(state, tf.convert_to_tensor(False, dtype=tf.bool)).numpy()
         else:
             # Use a hybrid cut selection rule.
-            if self.model.getBestSol() is not None:
-                quality = np.array([self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
-                    cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(
-                    cut) + 0.5 * self.model.getCutLPSolCutoffDistance(cut, self.model.getBestSol()) for cut in cuts])
-            else:
-                quality = np.array([1.5 * self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
-                    cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(cut) for cut in cuts])
+            quality = np.array([self.model.getCutEfficacy(cut) + 0.1 * self.model.getRowNumIntCols(
+                cut) / cut.getNNonz() + 0.1 * self.model.getRowObjParallelism(cut) for cut in cuts])
 
         # Rank the cuts in descending order of quality.
         rankings = sorted(range(len(cuts)), key=lambda x: quality[x], reverse=True)
@@ -143,8 +138,8 @@ class CustomCutsel(Cutsel):
         while i < n_selected - 1:
             # Mark all cuts that are parallel to higher-quality cut i.
             parallelism = [self.model.getRowParallelism(sorted_cuts[i], sorted_cuts[j]) for j in
-                           range(i + 1, len(sorted_cuts))]
-            parallelism = np.pad(parallelism, (i + 1, 0), constant_values=0)
+                           range(i + 1, n_selected)]
+            parallelism = np.pad(parallelism, (i + 1, len(cuts) - n_selected), constant_values=0)
             marked = (parallelism > self.p_max)
 
             # Only remove low-quality or very parallel cuts.
@@ -210,11 +205,18 @@ def benchmark_models(n_jobs: int):
     manager = Manager()
     task_queue = manager.Queue()
     for problem in problems:
+        # Find the best model.
+        best_loss = np.Inf
+        best_seed = 0
+        for seed in seeds:
+            loss = np.load(f"results/test/{problem}/{seed}_loss.npy")
+            if loss < best_loss:
+                best_loss = loss
+                best_seed = seed
         for selector in cut_selectors:
-            for seed in seeds:
-                for instance in instances:
-                    name, _ = os.path.splitext(os.path.basename(instance))
-                    task_queue.put((problem, selector, seed, name, instance))
+            for instance in instances:
+                name, _ = os.path.splitext(os.path.basename(instance))
+                task_queue.put((problem, selector, best_seed, name, instance))
 
     # Append worker termination signals to the queue.
     for i in range(n_jobs):
