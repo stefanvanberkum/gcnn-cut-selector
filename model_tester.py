@@ -168,7 +168,7 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
     mean_acc = np.zeros(len(fractions))
 
     n_samples = 0
-    n_cuts = 0
+    cut_count = 0
     for batch in dataloader:
         (cons_feats, cons_edge_inds, cons_edge_feats, var_feats, cut_feats, cut_edge_inds, cut_edge_feats, n_cons,
          n_vars, n_cuts, improvements) = batch
@@ -211,13 +211,13 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
 
             mean_acc += acc
             n_samples += batch_size
-            n_cuts += n_cuts_total.numpy()
+            cut_count += n_cuts_total.numpy()
         except tf.errors.ResourceExhaustedError:
             # Skip batch if it's too large.
             print("WARNING: batch skipped.")
             pass
 
-    loss /= n_cuts
+    loss /= cut_count
     mean_acc /= n_samples
 
     return loss, mean_acc
