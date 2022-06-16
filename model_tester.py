@@ -150,6 +150,8 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     # Record loss.
     np.save(loss_file, np.array(test_loss))
 
+    tf.keras.backend.clear_session()
+
     print("Done!")
     print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
     print("")

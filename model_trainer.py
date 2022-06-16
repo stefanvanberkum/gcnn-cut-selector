@@ -183,7 +183,8 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     write_log(f"BEST VALID LOSS: {valid_loss:.3e} " + "".join(
         [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
     write_log(f"Training time: {perf_counter() - wall_start} seconds", logfile)
-    tf.keras.clear_session()
+    
+    tf.keras.backend.clear_session()
 
     print("Done!")
     print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
