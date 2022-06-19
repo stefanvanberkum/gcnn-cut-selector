@@ -99,27 +99,6 @@ class Graph:
         return cliques
 
     @staticmethod
-    def erdos_renyi(n_nodes: int, p_edge: float, rng: np.random.Generator):
-        """Generates an Erdős-Rényi random graph with a given edge probability.
-
-        :param n_nodes: The number of nodes in the graph.
-        :param p_edge: The probability of generating an edge.
-        :param rng: A random number generator.
-        :return: The random graph.
-        """
-        edges = set()
-        degrees = np.zeros(n_nodes, dtype=int)
-        neighbors = {node: set() for node in range(n_nodes)}
-        for edge in combinations(np.arange(n_nodes), 2):
-            if rng.uniform() < p_edge:
-                edges.add(edge)
-                degrees[edge[0]] += 1
-                degrees[edge[1]] += 1
-                neighbors[edge[0]].add(edge[1])
-                neighbors[edge[1]].add(edge[0])
-        return Graph(n_nodes, edges, degrees, neighbors)
-
-    @staticmethod
     def barabasi_albert(n_nodes: int, rng: np.random.Generator, affinity=4):
         """Generates a Barabási-Albert random graph with a given affinity (number of connections for each new node).
 
@@ -609,7 +588,8 @@ def generate_capfac(n_customers: int, n_facilities: int, filepath: str, rng: np.
     # Generate demand, capacities, and fixed costs.
     demand = rng.integers(5, 35 + 1, size=n_customers)
     capacities = rng.integers(10, 160 + 1, size=n_facilities)
-    fixed_costs = rng.integers(90 + 1, size=n_facilities) + rng.integers(100, 110 + 1, size=n_facilities)
+    fixed_costs = rng.integers(90 + 1, size=n_facilities) + rng.integers(100, 110 + 1, size=n_facilities) * np.sqrt(
+        capacities)
     fixed_costs = fixed_costs.astype(int)
 
     total_demand = demand.sum()
