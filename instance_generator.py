@@ -46,7 +46,6 @@ class Graph:
     Methods
     =======
     - :meth:`clique_partition`: partitions the graph into cliques using a greedy algorithm.
-    - :meth:`erdos_renyi`: Generates an Erdős-Rényi random graph with a given edge probability.
     - :meth:`barabasi_albert`: Generates a Barabási-Albert random graph with a given edge probability.
 
     :ivar int n_nodes: The number of nodes in the graph.
