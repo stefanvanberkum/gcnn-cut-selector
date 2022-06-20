@@ -44,7 +44,7 @@ def test_models():
     problems = ['setcov', 'combauc', 'capfac', 'indset']
     for problem in problems:
         for i in range(5):
-            print(f"Testing a model for {problem} problems, iteration {i}...")
+            print(f"Testing a model for {problem} problems, iteration {i + 1}...")
             test_model(problem, seeds[i])
 
 
@@ -52,8 +52,8 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     """Test a trained model on testing data and write the results to a CSV file.
 
     The accuracy on given fractions of the cut candidate ranking is written to a CSV file. That is, how often the
-    model ranked the top x% of cut candidates correctly. Besides this, the hybrid baseline cut selector is also
-    tested for comparison.
+    model ranked the top x% of cut candidates correctly. Besides this, a baseline that simply returns the cuts in
+    the same order as they were provided and the hybrid cut selector are also tested for comparison.
 
     :param problem: The problem type to be considered, one of: {'setcov', 'combauc', 'capfac', or 'indset'}.
     :param seed: A seed that was used for training a models.
@@ -98,8 +98,9 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     # Test the model.
     test_loss, test_acc = process(model, test_data, fractions)
 
-    # Test the hybrid baseline cut selector.
+    # Test the baseline and hybrid cut selector.
     baseline_acc = np.zeros(len(fractions))
+    hybrid_acc = np.zeros(len(fractions))
 
     # Load samples.
     for filename in test_files:
@@ -125,8 +126,8 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
             pred_ranking = np.array(sorted(range(len(pred)), key=lambda x: pred[x], reverse=True))
             true_ranking = np.array(sorted(range(len(true)), key=lambda x: true[x], reverse=True))
 
-            # Find the first index that deviates.
-            differences = (pred_ranking != true_ranking)
+            # Find the first index that deviates for the baseline.
+            differences = (np.arange(len(true)) != true_ranking)
             if np.any(differences):
                 deviation = np.argmax(pred_ranking != true_ranking)
             else:
@@ -136,16 +137,31 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
             # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
             frac = deviation / len(pred)
             baseline_acc += (frac >= fractions)
+
+            # Find the first index that deviates for the hybrid cut selector.
+            differences = (pred_ranking != true_ranking)
+            if np.any(differences):
+                deviation = np.argmax(pred_ranking != true_ranking)
+            else:
+                # No deviations.
+                deviation = len(pred)
+
+            # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
+            frac = deviation / len(pred)
+            hybrid_acc += (frac >= fractions)
     baseline_acc /= len(test_files)
+    hybrid_acc /= len(test_files)
 
     fieldnames = ['type', 'seed', ] + [f'{100 * frac:.0f}%' for frac in fractions]
     with open(result_file, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerow(
-            {'type': 'gcnn', 'seed': seed, **{f'{100 * k:.0f}%': test_acc[i] for i, k in enumerate(fractions)}})
-        writer.writerow(
             {'type': 'baseline', 'seed': seed, **{f'{100 * k:.0f}%': baseline_acc[i] for i, k in enumerate(fractions)}})
+        writer.writerow(
+            {'type': 'hybrid', 'seed': seed, **{f'{100 * k:.0f}%': hybrid_acc[i] for i, k in enumerate(fractions)}})
+        writer.writerow(
+            {'type': 'gcnn', 'seed': seed, **{f'{100 * k:.0f}%': test_acc[i] for i, k in enumerate(fractions)}})
 
     # Record loss.
     np.save(loss_file, np.array(test_loss))

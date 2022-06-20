@@ -94,17 +94,22 @@ def summarize_testing(out_dir: str):
 
             # Retrieve stats and print.
             files = problem_files[problem]
-            gcnn_fracs = np.zeros((len(train_seeds), 4))
             baseline_fracs = np.zeros((len(train_seeds), 4))
+            hybrid_fracs = np.zeros((len(train_seeds), 4))
+            gcnn_fracs = np.zeros((len(train_seeds), 4))
             for i in range(len(train_seeds)):
                 stats = np.genfromtxt(files[str(train_seeds[i])], delimiter=',', skip_header=1)
-                gcnn_fracs[i, :] = 100 * stats[0, 2:]
-                baseline_fracs[i, :] = 100 * stats[1, 2:]
+                baseline_fracs[i, :] = 100 * stats[0, 2:]
+                hybrid_fracs[i, :] = 100 * stats[1, 2:]
+                gcnn_fracs[i, :] = 100 * stats[2, 2:]
+            baseline_means = baseline_fracs[0, :]  # Baseline is deterministic.
+            hybrid_means = hybrid_fracs[0, :]  # Hybrid cut selector is deterministic.
             gcnn_means = np.mean(gcnn_fracs, axis=0)
             gcnn_sds = np.std(gcnn_fracs, axis=0)
-            baseline_means = baseline_fracs[0, :]  # Hybrid cut selector is deterministic.
             print("baseline", f"{baseline_means[0]:.2f}", f"{baseline_means[1]:.2f}", f"{baseline_means[2]:.2f}",
                   f"{baseline_means[3]:.2f}", sep=',', file=file)
+            print("hybrid", f"{hybrid_means[0]:.2f}", f"{hybrid_means[1]:.2f}", f"{hybrid_means[2]:.2f}",
+                  f"{hybrid_means[3]:.2f}", sep=',', file=file)
             print("gcnn", f"{gcnn_means[0]:.2f} $\\pm$ {gcnn_sds[0]:.2f}",
                   f"{gcnn_means[1]:.2f} $\\pm$ {gcnn_sds[1]:.2f}", f"{gcnn_means[2]:.2f} $\\pm$ {gcnn_sds[2]:.2f}",
                   f"{gcnn_means[3]:.2f} $\\pm$ {gcnn_sds[3]:.2f}", sep=',', file=file)
