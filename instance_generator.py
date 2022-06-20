@@ -561,7 +561,7 @@ def generate_capfac(n_customers: int, n_facilities: int, filepath: str, rng: np.
     purpose, we first randomly place facilities and customers on a 1x1 surface. Then, demands are generated from
     :math:`U(5, 35)`. Capacities :math:`s_j` are generated from :math:`U(10, 160)` and the fixed costs are using the
     formula :math:`U(0, 90) + U(100, 110) \\cdot \\sqrt{s_j}`, to reflect economies of scale. The capacities are then
-    scaled to the desired capacity to demand ratio. Finally, we multiply the Euclidian distance between each customer
+    scaled to the desired capacity to demand ratio. Finally, we multiply the Euclidean distance between each customer
     and facility by 10 to obtain the unit cost of serving a customer from a particular facility, which is then
     multiplied by the demand of that customer to obtain the total transportation costs.
 
