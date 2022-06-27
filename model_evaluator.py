@@ -21,6 +21,7 @@ from argparse import ArgumentParser
 from datetime import timedelta
 from math import ceil
 from multiprocessing import Manager, Process, Queue, cpu_count
+from resource import RUSAGE_CHILDREN, RUSAGE_SELF, getrusage
 from time import perf_counter, process_time
 
 import numpy as np
@@ -180,9 +181,8 @@ def evaluate_models(n_jobs: int):
     :param n_jobs: The number of jobs to run in parallel.
     """
 
-    # Start timers.
+    # Start timer.
     wall_start = perf_counter()
-    proc_start = process_time()
 
     print("Evaluating models...")
 
@@ -257,9 +257,15 @@ def evaluate_models(n_jobs: int):
                 {'problem': problem, 'difficulty': difficulty, 'instance': instance, 'selector': selector, 'seed': seed,
                  'n_nodes': n_nodes, 'n_lps': n_lps, 'solve_time': solve_time, 'gap': gap, 'status': status,
                  'wall_time': wall_time, 'process_time': proc_time})
+
+    # Get combined usage of all processes.
+    usage_self = getrusage(RUSAGE_SELF)
+    usage_children = getrusage(RUSAGE_CHILDREN)
+    cpu_time = usage_self[0] + usage_self[1] + usage_children[0] + usage_children[1]
+
     print("Done!")
     print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
-    print(f"CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
+    print(f"CPU time: {str(timedelta(seconds=ceil(cpu_time)))}")
 
 
 def process_tasks(task_queue: Queue, out_queue: Queue):

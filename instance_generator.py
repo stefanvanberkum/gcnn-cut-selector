@@ -31,8 +31,9 @@ from argparse import ArgumentParser
 from datetime import timedelta
 from itertools import combinations
 from math import ceil
-from multiprocessing import Process, Queue, cpu_count
-from time import perf_counter, process_time
+from multiprocessing import Manager, Process, Queue, cpu_count
+from resource import RUSAGE_CHILDREN, RUSAGE_SELF, getrusage
+from time import perf_counter
 
 import numpy as np
 import scipy.sparse
@@ -179,9 +180,8 @@ def generate_instances(n_jobs: int):
     :param n_jobs: The number of jobs to run in parallel.
     """
 
-    # Start timers.
+    # Start timer.
     wall_start = perf_counter()
-    proc_start = process_time()
 
     print("Generating instances...")
     make_dirs()
@@ -193,7 +193,8 @@ def generate_instances(n_jobs: int):
     rng = np.random.default_rng(seed)
 
     # Schedule jobs.
-    task_queue = Queue()
+    manager = Manager()
+    task_queue = manager.Queue()
     for problem in problems:
         for dataset in datasets:
             for i in range(n_instances[dataset]):
@@ -214,9 +215,15 @@ def generate_instances(n_jobs: int):
     # Wait for all workers to finish.
     for worker in workers:
         worker.join()
+
+    # Get combined usage of all processes.
+    usage_self = getrusage(RUSAGE_SELF)
+    usage_children = getrusage(RUSAGE_CHILDREN)
+    cpu_time = usage_self[0] + usage_self[1] + usage_children[0] + usage_children[1]
+
     print("Done!")
     print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
-    print(f"CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
+    print(f"CPU time: {str(timedelta(seconds=ceil(cpu_time)))}")
 
 
 def make_dirs():

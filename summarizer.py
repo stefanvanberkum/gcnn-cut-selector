@@ -15,6 +15,9 @@ Functions
 """
 
 import os
+from datetime import timedelta
+from math import ceil
+from time import perf_counter, process_time
 
 import numpy as np
 
@@ -24,6 +27,10 @@ from utils import load_seeds
 def summarize_stats():
     """Summarize all obtained results and writes the summaries to CSV files."""
 
+    # Start timers.
+    wall_start = perf_counter()
+    proc_start = process_time()
+
     out_dir = "summaries"
     os.makedirs(out_dir)
 
@@ -31,6 +38,10 @@ def summarize_stats():
     summarize_testing(out_dir)
     summarize_evaluation(out_dir)
     summarize_benchmarking(out_dir)
+
+    print("Done!")
+    print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
+    print(f"CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
 
 
 def summarize_sampling(out_dir: str):
@@ -276,8 +287,12 @@ def summarize_evaluation(out_dir: str):
 
                             if (instance, seed) in solved_by_both:
                                 node_counts.append(int_data[j, 2])
-                        node_means[i] = np.round(np.mean(node_counts)).astype(int)
-                        node_diffs[i] = 100 * np.std(node_counts) / node_means[i]
+                        node_counts = np.array(node_counts)
+                        k = len(node_counts)
+                        s = 1
+                        node_sgm = np.exp(np.sum(np.log(np.maximum(node_counts + s, 1))) / k) - s
+                        node_means[i] = np.round(node_sgm).astype(int)
+                        node_diffs[i] = 100 * np.sqrt(np.mean(np.power(node_counts - node_sgm, 2))) / node_sgm
 
                 lines[0] += [f"{time_means[0]:.2f} $\\pm$ {time_diffs[0]:.1f}%", f"{baseline_wins}",
                              f"{node_means[0]:d} $\\pm$ {node_diffs[0]:.1f}%", ""]
@@ -441,8 +456,12 @@ def summarize_benchmarking(out_dir: str):
 
                         if (instance, seed) in solved_by_both:
                             node_counts.append(int_data[j, 1])
-                    node_means[i] = np.round(np.mean(node_counts)).astype(int)
-                    node_diffs[i] = 100 * np.std(node_counts) / node_means[i]
+                    node_counts = np.array(node_counts)
+                    k = len(node_counts)
+                    s = 1
+                    node_sgm = np.exp(np.sum(np.log(np.maximum(node_counts + s, 1))) / k) - s
+                    node_means[i] = np.round(node_sgm).astype(int)
+                    node_diffs[i] = 100 * np.sqrt(np.mean(np.power(node_counts - node_sgm, 2))) / node_sgm
 
             print("hybrid", f"{time_means[0]:.2f} $\\pm$ {time_diffs[0]:.1f}%", f"{baseline_wins}",
                   f"{node_means[0]:d} $\\pm$ {node_diffs[0]:.1f}%", sep=',', file=file)

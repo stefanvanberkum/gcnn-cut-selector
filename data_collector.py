@@ -33,8 +33,9 @@ import shutil
 from argparse import ArgumentParser
 from datetime import timedelta
 from math import ceil
-from multiprocessing import Process, Queue, SimpleQueue, cpu_count
-from time import perf_counter, process_time
+from multiprocessing import Manager, Process, SimpleQueue, cpu_count
+from resource import RUSAGE_CHILDREN, RUSAGE_SELF, getrusage
+from time import perf_counter
 
 import numpy as np
 from pyscipopt import Model, SCIP_LPSOLSTAT, SCIP_RESULT
@@ -301,14 +302,14 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
         respectively.
     """
 
-    # Start timers.
+    # Start timer.
     wall_start = perf_counter()
-    proc_start = process_time()
 
     os.makedirs(out_dir, exist_ok=True)
 
     # Start workers, and tell them to process orders from the task queue and send samples to the out queue.
-    task_queue = Queue(maxsize=2 * n_jobs)
+    manager = Manager()
+    task_queue = manager.Queue(maxsize=2 * n_jobs)
     out_queue = SimpleQueue()
     workers = []
     for i in range(n_jobs):
@@ -381,8 +382,13 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
     # Remove temporary directory.
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    # Get combined usage of all processes.
+    usage_self = getrusage(RUSAGE_SELF)
+    usage_children = getrusage(RUSAGE_CHILDREN)
+    cpu_time = usage_self[0] + usage_self[1] + usage_children[0] + usage_children[1]
+
     print(f"    - Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
-    print(f"    - CPU time: {str(timedelta(seconds=ceil(process_time() - proc_start)))}")
+    print(f"    - CPU time: {str(timedelta(seconds=ceil(cpu_time)))}")
 
     return n_instances, len(unique)
 
