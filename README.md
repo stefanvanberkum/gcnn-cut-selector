@@ -21,10 +21,7 @@ A graph convolutional neural network (GCNN) for cutting plane selection.
 The experiments can either be run from an editor (one long run) or via the command line (many short runs). If you run on
 a single machine, running from the editor is the most straightforward. The command line is especially useful if you
 would like to run multiple jobs concurrently. Both the editor and command line make use of parallelization wherever
-possible.
-
-There have been minor changes to the code after running the original experiments, so some differences in the results
-might occur.
+possible. Optional plotting of node counts can be done in R.
 
 ### Editor
 
@@ -33,8 +30,8 @@ configurations.
 
 _Note._ When using GPU for TensorFlow, if many memory errors occur during model training, consider reducing the batch
 size. If there are just a few, the algorithm will skip these batches that are too large. Moreover, when training the
-models sequentially, it seems that GPU memory can get clogged, so restarting your computer and rerunning from the part
-that yields errors might help too.
+models sequentially, it seems that GPU memory can get clogged if many batches are skipped, so restarting your computer
+and rerunning from the part that yields errors might help too.
 
 ### Command line
 
@@ -145,9 +142,9 @@ python summarizer.py
     - Module used for testing trained models.
 - ```model_trainer.py```
     - Module used for training models.
+- ```plotter.R```
+    - Module used for plotting node counts in R.
 - ```summarizer.py```
     - Module used to summarize all obtained results.
 - ```utils.py```
     - Module that provides some general utility methods.
-
-## Running times
