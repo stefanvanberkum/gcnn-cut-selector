@@ -147,7 +147,7 @@ def generate_instances(n_jobs: int):
     """Generate set covering, combinatorial auction, capacitated facility location, and independent set problem
     instances in accordance with our data generation scheme.
 
-    For each problem type, this method generates 10000 samples for training, 2000 for evaluation, 2000 for testing,
+    For each problem type, this method generates 10000 samples for training, 2000 for validation, 2000 for testing,
     and 20 for each difficulty level (easy, medium, and hard). The dimensions of the generated problems are as follows:
 
     - Set covering:
