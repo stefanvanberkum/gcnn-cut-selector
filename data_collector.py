@@ -205,6 +205,9 @@ def collect_data(n_jobs: int):
     :param n_jobs: The number of jobs to run in parallel.
     """
 
+    # Start timer.
+    wall_start = perf_counter()
+
     seed = load_seeds(name='program_seeds')[1]
     seed_generator = np.random.default_rng(seed)
     seeds = seed_generator.integers(2 ** 32, size=4)
@@ -239,6 +242,16 @@ def collect_data(n_jobs: int):
     test = sorted(glob.glob('data/instances/indset/test_500n/*.lp'))
     out_dir = 'data/samples/indset/500n'
     collect_problem(train, valid, test, out_dir, n_jobs, seeds[3])
+    print("")
+
+    # Get combined usage of all processes.
+    usage_self = getrusage(RUSAGE_SELF)
+    usage_children = getrusage(RUSAGE_CHILDREN)
+    cpu_time = usage_self[0] + usage_self[1] + usage_children[0] + usage_children[1]
+
+    print("Done!")
+    print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
+    print(f"CPU time: {str(timedelta(seconds=ceil(cpu_time)))}")
 
 
 def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir: str, n_jobs: int, seed: int,
@@ -382,13 +395,7 @@ def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: 
     # Remove temporary directory.
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    # Get combined usage of all processes.
-    usage_self = getrusage(RUSAGE_SELF)
-    usage_children = getrusage(RUSAGE_CHILDREN)
-    cpu_time = usage_self[0] + usage_self[1] + usage_children[0] + usage_children[1]
-
     print(f"    - Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_start)))}")
-    print(f"    - CPU time: {str(timedelta(seconds=ceil(cpu_time)))}")
 
     return n_instances, len(unique)
 
@@ -455,6 +462,9 @@ if __name__ == '__main__':
                         default=cpu_count())
     args = parser.parse_args()
 
+    # Start timer.
+    wall_begin = perf_counter()
+
     sample_count = {'train': 100000, 'valid': 20000, 'test': 20000}
     problem_indices = {'setcov': 0, 'combauc': 1, 'capfac': 2, 'indset': 3}
     set_indices = {'train': 0, 'valid': 1, 'test': 2}
@@ -486,3 +496,12 @@ if __name__ == '__main__':
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerow({'set': args.set, 'n_total': n_total, 'n_unique': n_unique})
+
+    # Get combined usage of all processes.
+    use_self = getrusage(RUSAGE_SELF)
+    use_children = getrusage(RUSAGE_CHILDREN)
+    cpu_t = use_self[0] + use_self[1] + use_children[0] + use_children[1]
+
+    print("Done!")
+    print(f"Wall time: {str(timedelta(seconds=ceil(perf_counter() - wall_begin)))}")
+    print(f"CPU time: {str(timedelta(seconds=ceil(cpu_t)))}")
