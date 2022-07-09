@@ -292,7 +292,7 @@ def collect_problem(train: list[str], valid: list[str], test: list[str], out_dir
         with open(out_dir + f"/{set_type}_stats.csv", 'w', newline='') as f:
             dict_writer = csv.DictWriter(f, fieldnames=fields)
             dict_writer.writeheader()
-            dict_writer.writerow({'set': 'train', 'n_total': set_stats[0], 'n_unique': set_stats[1]})
+            dict_writer.writerow({'set': set_type, 'n_total': set_stats[0], 'n_unique': set_stats[1]})
 
 
 def collect_samples(instances: list[str], n_samples: int, n_jobs: int, out_dir: str, rng: np.random.Generator):
