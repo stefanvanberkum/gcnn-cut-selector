@@ -101,38 +101,44 @@ def summarize_testing(out_dir: str):
     problem_files = {'setcov': setcov_test, 'combauc': combauc_test, 'capfac': capfac_test, 'indset': indset_test}
 
     with open(os.path.join(out_dir, "test_stats.csv"), 'w') as file:
-        for problem in problem_files.keys():
-            # Print headers.
-            print(problem, "25%", "50%", "75%", "100%", sep=',', file=file)
+        # Print headers.
+        print("Ranking", "setcov", "combauc", "capfac", "indset", sep=',', file=file)
 
+        random_means = np.zeros(4)
+        hybrid_means = np.zeros(4)
+        gcnn_means = np.zeros(4)
+        random_sds = np.zeros(4)
+        hybrid_sds = np.zeros(4)
+        gcnn_sds = np.zeros(4)
+        j = 0
+        for problem in problem_files.keys():
             # Retrieve stats and print.
             files = problem_files[problem]
-            random_fracs = np.zeros((len(train_seeds), 4))
-            hybrid_fracs = np.zeros((len(train_seeds), 4))
-            gcnn_fracs = np.zeros((len(train_seeds), 4))
+            random_fracs = np.zeros(len(train_seeds))
+            hybrid_fracs = np.zeros(len(train_seeds))
+            gcnn_fracs = np.zeros(len(train_seeds))
             for i in range(len(train_seeds)):
                 stats = np.genfromtxt(files[str(train_seeds[i])], delimiter=',', skip_header=1)
-                random_fracs[i, :] = 100 * stats[0, 2:]
-                hybrid_fracs[i, :] = 100 * stats[1, 2:]
-                gcnn_fracs[i, :] = 100 * stats[2, 2:]
-            random_means = np.mean(random_fracs, axis=0)
-            random_sds = np.std(random_fracs, axis=0)
-            hybrid_means = hybrid_fracs[0, :]  # Hybrid cut selector is deterministic.
-            hybrid_sds = np.zeros(4)
-            gcnn_means = np.mean(gcnn_fracs, axis=0)
-            gcnn_sds = np.std(gcnn_fracs, axis=0)
-            print("random", f"${random_means[0]:.2f} \\pm {random_sds[0]:.2f}$",
-                  f"${random_means[1]:.2f} \\pm {random_sds[1]:.2f}$",
-                  f"${random_means[2]:.2f} \\pm {random_sds[2]:.2f}$",
-                  f"${random_means[3]:.2f} \\pm {random_sds[3]:.2f}$", sep=',', file=file)
-            print("hybrid", f"${hybrid_means[0]:.2f} \\pm {hybrid_sds[0]:.2f}$",
-                  f"${hybrid_means[1]:.2f} \\pm {hybrid_sds[1]:.2f}$",
-                  f"${hybrid_means[2]:.2f} \\pm {hybrid_sds[2]:.2f}$",
-                  f"${hybrid_means[3]:.2f} \\pm {hybrid_sds[3]:.2f}$", sep=',', file=file)
-            print("gcnn", f"${gcnn_means[0]:.2f} \\pm {gcnn_sds[0]:.2f}$",
-                  f"${gcnn_means[1]:.2f} \\pm {gcnn_sds[1]:.2f}$", f"${gcnn_means[2]:.2f} \\pm {gcnn_sds[2]:.2f}$",
-                  f"${gcnn_means[3]:.2f} \\pm {gcnn_sds[3]:.2f}$", sep=',', file=file)
-            print("", file=file)
+                random_fracs[i] = 100 * stats[0, 2]
+                hybrid_fracs[i] = 100 * stats[1, 2]
+                gcnn_fracs[i] = 100 * stats[2, 2]
+            random_means[j] = np.mean(random_fracs)
+            random_sds[j] = np.std(random_fracs)
+            hybrid_means[j] = hybrid_fracs[0]  # Hybrid cut selector is deterministic.
+            hybrid_sds[j] = 0
+            gcnn_means[j] = np.mean(gcnn_fracs)
+            gcnn_sds[j] = np.std(gcnn_fracs)
+            j += 1
+        print("random", f"${random_means[0]:.2f} \\pm {random_sds[0]:.2f}$",
+              f"${random_means[1]:.2f} \\pm {random_sds[1]:.2f}$", f"${random_means[2]:.2f} \\pm {random_sds[2]:.2f}$",
+              f"${random_means[3]:.2f} \\pm {random_sds[3]:.2f}$", sep=',', file=file)
+        print("hybrid", f"${hybrid_means[0]:.2f} \\pm {hybrid_sds[0]:.2f}$",
+              f"${hybrid_means[1]:.2f} \\pm {hybrid_sds[1]:.2f}$", f"${hybrid_means[2]:.2f} \\pm {hybrid_sds[2]:.2f}$",
+              f"${hybrid_means[3]:.2f} \\pm {hybrid_sds[3]:.2f}$", sep=',', file=file)
+        print("gcnn", f"${gcnn_means[0]:.2f} \\pm {gcnn_sds[0]:.2f}$", f"${gcnn_means[1]:.2f} \\pm {gcnn_sds[1]:.2f}$",
+              f"${gcnn_means[2]:.2f} \\pm {gcnn_sds[2]:.2f}$", f"${gcnn_means[3]:.2f} \\pm {gcnn_sds[3]:.2f}$", sep=',',
+              file=file)
+        print("", file=file)
 
 
 def summarize_evaluation(out_dir: str):

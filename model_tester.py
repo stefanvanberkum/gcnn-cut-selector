@@ -51,9 +51,9 @@ def test_models():
 def test_model(problem: str, seed: np.array, test_batch_size=32):
     """Test a trained model on testing data and write the results to a CSV file.
 
-    The accuracy on given fractions of the cut candidate ranking is written to a CSV file. That is, how often the
-    model ranked the top x% of cut candidates correctly. Besides this, a baseline that randomly ranks cuts and the
-    hybrid cut selector are also tested for comparison.
+    The average accuracy of the cut candidate ranking is written to a CSV file (i.e., how many cut candidates the
+    model ranked correctly on average). Besides this, a baseline that randomly ranks cuts and the hybrid cut selector
+    are also tested for comparison.
 
     :param problem: The problem type to be considered, one of: {'setcov', 'combauc', 'capfac', or 'indset'}.
     :param seed: A seed that was used for training a models.
@@ -62,8 +62,6 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
 
     # Start timer.
     wall_start = perf_counter()
-
-    fractions = np.array([0.25, 0.5, 0.75, 1])
 
     problem_folders = {'setcov': 'setcov/500r', 'combauc': 'combauc/100i_500b', 'capfac': 'capfac/100c_100f',
                        'indset': 'indset/500n'}
@@ -96,11 +94,11 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     test_data = test_data.prefetch(2)
 
     # Test the model.
-    test_loss, test_acc = process(model, test_data, fractions)
+    test_loss, test_acc = process(model, test_data)
 
     # Test the baseline and hybrid cut selector.
-    random_acc = np.zeros(len(fractions))
-    hybrid_acc = np.zeros(len(fractions))
+    random_acc = 0
+    hybrid_acc = 0
 
     # Load samples.
     for filename in test_files:
@@ -138,7 +136,7 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
 
             # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
             frac = deviation / len(true)
-            random_acc += (frac >= fractions)
+            random_acc += frac
 
             # Find the first index that deviates for the hybrid cut selector.
             differences = (pred_ranking != true_ranking)
@@ -150,20 +148,17 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
 
             # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
             frac = deviation / len(true)
-            hybrid_acc += (frac >= fractions)
+            hybrid_acc += frac
     random_acc /= len(test_files)
     hybrid_acc /= len(test_files)
 
-    fieldnames = ['type', 'seed', ] + [f'{100 * frac:.0f}%' for frac in fractions]
+    fieldnames = ['type', 'seed', 'fraction']
     with open(result_file, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerow(
-            {'type': 'random', 'seed': seed, **{f'{100 * k:.0f}%': random_acc[i] for i, k in enumerate(fractions)}})
-        writer.writerow(
-            {'type': 'hybrid', 'seed': seed, **{f'{100 * k:.0f}%': hybrid_acc[i] for i, k in enumerate(fractions)}})
-        writer.writerow(
-            {'type': 'gcnn', 'seed': seed, **{f'{100 * k:.0f}%': test_acc[i] for i, k in enumerate(fractions)}})
+        writer.writerow({'type': 'random', 'seed': seed, 'fraction': random_acc})
+        writer.writerow({'type': 'hybrid', 'seed': seed, 'fraction': hybrid_acc})
+        writer.writerow({'type': 'gcnn', 'seed': seed, 'fraction': test_acc})
 
     # Record loss.
     np.save(loss_file, np.array(test_loss))
@@ -175,17 +170,16 @@ def test_model(problem: str, seed: np.array, test_batch_size=32):
     print("")
 
 
-def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
+def process(model: GCNN, dataloader: tf.data.Dataset):
     """Run the input data through a trained model.
 
     :param model: The trained model.
     :param dataloader: The input dataset to process.
-    :param fractions: A list of fractions to compute the accuracy over (top x% correct).
     :return: The loss and mean accuracies over the input data.
     """
 
     loss = 0
-    mean_acc = np.zeros(len(fractions))
+    mean_acc = 0
 
     n_samples = 0
     cut_count = 0
@@ -208,7 +202,7 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
             predictions = tf.split(value=predictions, num_or_size_splits=n_cuts)
             improvements = tf.split(value=improvements, num_or_size_splits=n_cuts)
 
-            acc = np.zeros(len(fractions))
+            acc = 0
             for i in range(batch_size):
                 pred = predictions[i].numpy()
                 true = improvements[i].numpy()
@@ -227,7 +221,7 @@ def process(model: GCNN, dataloader: tf.data.Dataset, fractions: np.array):
 
                 # Compute the fraction of cuts that were ranked correctly and record it in the accuracy matrix.
                 frac = deviation / len(pred)
-                acc += (frac >= fractions)
+                acc += frac
 
             mean_acc += acc
             n_samples += batch_size
