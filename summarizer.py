@@ -123,11 +123,11 @@ def summarize_testing(out_dir: str):
                 hybrid_fracs[i] = 100 * stats[1, 2]
                 gcnn_fracs[i] = 100 * stats[2, 2]
             random_means[j] = np.mean(random_fracs)
-            random_sds[j] = np.std(random_fracs)
+            random_sds[j] = np.std(random_fracs, ddof=1)
             hybrid_means[j] = hybrid_fracs[0]  # Hybrid cut selector is deterministic.
             hybrid_sds[j] = 0
             gcnn_means[j] = np.mean(gcnn_fracs)
-            gcnn_sds[j] = np.std(gcnn_fracs)
+            gcnn_sds[j] = np.std(gcnn_fracs, ddof=1)
             j += 1
         print("random", f"${random_means[0]:.2f} \\pm {random_sds[0]:.2f}$",
               f"${random_means[1]:.2f} \\pm {random_sds[1]:.2f}$", f"${random_means[2]:.2f} \\pm {random_sds[2]:.2f}$",
@@ -230,10 +230,10 @@ def summarize_evaluation(out_dir: str):
                         node_diff = subsub_stats.loc[:, 'n_nodes'].groupby('instance').aggregate(perc_std).to_numpy()
                         node_diffs[i] = np.mean(node_diff)
 
-                lines[0] += [f"${time_means[0]:.2f} \\pm {time_diffs[0]:.1f}\\%$", f"{hybrid_wins}",
-                             f"${node_means[0]:d} \\pm {node_diffs[0]:.1f}\\%$", ""]
-                lines[1] += [f"${time_means[1]:.2f} \\pm {time_diffs[1]:.1f}\\%$", f"{gcnn_wins}",
-                             f"${node_means[1]:d} \\pm {node_diffs[1]:.1f}\\%$", ""]
+                lines[0] += [f"${time_means[0]:.2f} \\pm {time_diffs[0]:.0f}\\%$", f"{hybrid_wins}",
+                             f"${node_means[0]:d} \\pm {node_diffs[0]:.0f}\\%$", ""]
+                lines[1] += [f"${time_means[1]:.2f} \\pm {time_diffs[1]:.0f}\\%$", f"{gcnn_wins}",
+                             f"${node_means[1]:d} \\pm {node_diffs[1]:.0f}\\%$", ""]
             print("hybrid", *lines[0], sep=',', file=file)
             print("gcnn", *lines[1], sep=',', file=file)
             print("", file=file)
@@ -254,7 +254,10 @@ def perc_std(x):
     :return: The percentual standard deviation.
     """
 
-    return 100 * np.std(x) / np.mean(x)
+    if len(x) > 1:
+        return 100 * np.std(x, ddof=1) / np.mean(x)
+    else:
+        return 0
 
 
 def summarize_benchmarking(out_dir: str):
