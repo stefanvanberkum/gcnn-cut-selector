@@ -49,8 +49,8 @@ def train_models():
             train_model(problem, seeds[i])
 
 
-def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_size=32, pretrain_batch_size=32,
-                valid_batch_size=32, lr=0.001, patience=10, early_stopping=20):
+def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=2500, batch_size=4, pretrain_batch_size=2,
+                valid_batch_size=4, lr=0.0001, patience=10, early_stopping=20):
     """Train a model.
 
     On the first epoch, the model is pretrained. Afterwards, regular training commences. The learning rate is
@@ -183,7 +183,7 @@ def train_model(problem: str, seed: int, max_epochs=1000, epoch_size=312, batch_
     write_log(f"BEST VALID LOSS: {valid_loss:.3e} " + "".join(
         [f" {100 * frac:.0f}%: {100 * acc:.3f}" for frac, acc in zip(fractions, valid_acc)]), logfile)
     write_log(f"Training time: {perf_counter() - wall_start} seconds", logfile)
-    
+
     tf.keras.backend.clear_session()
 
     print("Done!")
