@@ -201,6 +201,12 @@ def generate_instances(n_jobs: int):
                 task_queue.put(
                     {'problem': problem, 'dataset': dataset, 'number': i + 1, 'seed': rng.integers(np.iinfo(int).max)})
 
+    # Schedule jobs for IGC instances separately, to keep additional results consistent with main paper.
+    for problem in problems:
+        for i in range(500):
+            task_queue.put(
+                {'problem': problem, 'dataset': 'eval_igc', 'number': i + 1, 'seed': rng.integers(np.iinfo(int).max)})
+
     # Append worker termination signals to the queue.
     for worker in range(n_jobs):
         task_queue.put({'problem': 'done'})
@@ -229,12 +235,12 @@ def generate_instances(n_jobs: int):
 def make_dirs():
     """Create all directories."""
 
-    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 700, 'hard': 900}
-    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
-    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 750, 'hard': 1000}
-    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
-    n_facilities = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
-    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 800, 'hard': 1100}
+    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 700, 'hard': 900, 'eval_igc': 500}
+    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200, 'eval_igc': 100}
+    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 750, 'hard': 1000, 'eval_igc': 500}
+    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200, 'eval_igc': 100}
+    n_facilities = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200, 'eval_igc': 100}
+    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 800, 'hard': 1100, 'eval_igc': 500}
 
     for dataset in n_rows.keys():
         if dataset == 'easy' or dataset == 'medium' or dataset == 'hard':
@@ -263,12 +269,12 @@ def process_tasks(task_queue: Queue):
     :param task_queue: The task queue from which the worker needs to fetch tasks.
     """
 
-    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 700, 'hard': 900}
-    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
-    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 750, 'hard': 1000}
-    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
-    n_facilities = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200}
-    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 800, 'hard': 1100}
+    n_rows = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 700, 'hard': 900, 'eval_igc': 500}
+    n_items = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200, 'eval_igc': 100}
+    n_bids = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 750, 'hard': 1000, 'eval_igc': 500}
+    n_customers = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200, 'eval_igc': 100}
+    n_facilities = {'train': 100, 'valid': 100, 'test': 100, 'easy': 100, 'medium': 150, 'hard': 200, 'eval_igc': 100}
+    n_nodes = {'train': 500, 'valid': 500, 'test': 500, 'easy': 500, 'medium': 800, 'hard': 1100, 'eval_igc': 500}
 
     while True:
         # Fetch a task.
